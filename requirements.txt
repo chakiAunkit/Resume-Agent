@@ -1,0 +1,13 @@
+langgraph
+langchain-anthropic
+langchain-openai
+pydantic
+python-dotenv
+pyyaml
+jinja2
+playwright
+pypdf
+httpx
+pytest
+rich
+# sentence-transformers   # uncomment at the ranking phase (~2GB with torch)

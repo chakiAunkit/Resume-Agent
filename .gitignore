@@ -1,0 +1,12 @@
+# personal data — never commit
+assets/
+data/profile.yaml
+data/jobs_cache/
+output/
+.env
+.env.local
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/

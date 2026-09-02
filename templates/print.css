@@ -1,0 +1,157 @@
+/* =====================================================================
+   print.css — ALL presentation lives here; resume.json stays pure content.
+
+   Page geometry is owned by @page below. The renderer must print with
+   prefer_css_page_size=True and pass NO margin arguments, so this file
+   is the single source of truth for paper size and margins.
+   ===================================================================== */
+
+@page {
+  size: A4;
+  margin: 0.35in; /* matches the LaTeX geometry package settings */
+}
+
+/* --scale is the fit loop's single knob, injected by the renderer.
+   Every size below is in rem, so shrinking :root font-size shrinks the
+   whole document proportionally: text, indents, gaps, icons. */
+:root {
+  font-size: calc(10.5pt * var(--scale, 1));
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  /* Latin Modern / CMU Serif give pixel-parity with LaTeX if installed;
+     Georgia / Times are the everywhere-available fallbacks. */
+  font-family: "Latin Modern Roman", "CMU Serif", Georgia, "Times New Roman", serif;
+  color: #000;
+  line-height: 1.25;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+a {
+  color: #0000ff; /* hyperref's colorlinks blue */
+  text-decoration: none;
+}
+
+.flow {
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* ------------------------------ header ------------------------------ */
+
+.header {
+  text-align: center;
+}
+
+.name {
+  font-size: 2.3rem; /* ~ LaTeX \Huge at a 10.5pt base */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+}
+
+.contact-line {
+  font-size: 0.95rem;
+  margin-top: 0.18rem;
+}
+
+.contact-item {
+  margin: 0 0.4rem;
+  white-space: nowrap;
+}
+
+.icon {
+  height: 0.78em;
+  width: 0.9em;
+  fill: currentColor;
+  vertical-align: -0.02em;
+  margin-right: 0.25em;
+}
+
+/* -------- sections: mirrors resume.cls rSection --------
+   flush-left uppercase heading, full-width rule, indented body */
+
+.rsection {
+  margin-top: 0.55rem;
+}
+
+.rsection > h2 {
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 0.75pt solid #000;
+  padding-bottom: 0.12rem;
+  margin-bottom: 0.3rem;
+  break-after: avoid; /* a heading never sits orphaned at a page bottom */
+}
+
+.rsection-body {
+  margin-left: 1.5rem; /* ~0.22in body indent, scales with --scale */
+}
+
+/* ------------------------------ entries ----------------------------- */
+
+.entry {
+  margin-bottom: 0.45rem;
+}
+
+.entry:last-child {
+  margin-bottom: 0;
+}
+
+.entry-head,
+.entry-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.entry-head {
+  break-after: avoid; /* company line never separates from its bullets */
+}
+
+.entry-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.entry-dates {
+  white-space: nowrap;
+}
+
+.year {
+  font-style: italic;
+}
+
+/* ------------------------------ bullets ----------------------------- */
+
+ul.bullets {
+  margin: 0.18rem 0 0 1.15rem;
+}
+
+ul.bullets li {
+  padding-left: 0.15rem;
+  margin-bottom: 0.14rem;
+  text-align: justify;
+  hyphens: auto;
+  break-inside: avoid; /* a single bullet never splits across pages */
+}
+
+/* --------------------- skills / publications ------------------------ */
+
+.skill-line {
+  margin-bottom: 0.06rem;
+}
+
+.pub {
+  margin-bottom: 0.14rem;
+}

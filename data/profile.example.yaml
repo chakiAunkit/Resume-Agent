@@ -1,0 +1,41 @@
+# profile.example.yaml — sanitized 2-atom sample of data/profile.yaml.
+#
+# The real profile.yaml is gitignored. Schema: src/atoms.py.
+# Conventions:
+#   * one atom per project / achievement / metric
+#   * id: kebab-case, prefixed with the source ("target-", "paypal-", "self-")
+#   * summary: one bullet-sized paragraph, written as a resume claim
+#   * metrics: the literal figures the Tailor may quote verbatim
+#   * quote dates ("09/2025") — YAML would otherwise parse some of them
+#     as numbers or dates and the MM/YYYY check would fail
+
+atoms:
+  - id: target-goa-dmo-mismatch
+    section: experience
+    source: Target Corporation
+    title: Shipping-service mismatch analysis
+    summary: >-
+      Analyzed 90M+ parcels and 60M+ customer orders over 6 months using
+      HiveQL to uncover a 20% mismatch between GOA (Guest Order Allocation)
+      and DMO (Delivery Mode Optimization) in shipping service selection,
+      enabling a logic redesign that unlocked $8M in annual cost savings.
+    start: "09/2022"
+    end: "05/2025"
+    skills: [HiveQL, SQL, Root-cause analysis]
+    keywords: [supply chain, logistics, e-commerce, cost savings, order fulfilment]
+    metrics: ["90M+ parcels", "60M+ customer orders", "20% mismatch", "$8M annual cost savings"]
+
+  - id: self-text2sql-memory-agent
+    section: project
+    source: Text2SQL Agent with Long-Term Memory
+    title: Local Text2SQL agent with long-term memory
+    summary: >-
+      Built a fully local, open-source Text2SQL agent with a Mem0-inspired
+      long-term memory layer (PostgreSQL + pgvector, qwen2.5-coder:7b via
+      Ollama, Gradio) that learns user preferences, terminology, and metrics
+      across sessions with per-user isolation.
+    skills: [Python, PostgreSQL, pgvector, Ollama, Gradio, LLMs]
+    keywords: [text-to-sql, agents, memory, RAG, vector database, local LLM]
+    links:
+      github: https://github.com/chakiAunkit/Text2SQL-Memory-Agent
+      article: https://medium.com/towards-artificial-intelligence/building-a-fully-local-open-source-text2sql-agent-with-long-term-memory-no-api-keys-no-cloud-e1a7242ca7f6

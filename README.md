@@ -63,7 +63,11 @@ pytest                        # full acceptance suite
 
 ## Status
 
-Phases 0–1 complete: the deterministic render pipeline reproduces the
+Phases 0–2 complete. The deterministic render pipeline reproduces the
 current CV from structured data, under test — schema-validated JSON →
-HTML → Chromium print → measured page count. Next: Phase 2, the evidence
-store and retrieval.
+HTML → Chromium print → measured page count. The evidence layer is in
+place: `data/profile.yaml` holds everything true about the candidate as
+schema-validated atoms (a superset of the CV, gitignored), and
+`src/tools/evidence.py` retrieves a ranked, explainable subset for a
+query — `python -m src.tools.evidence "fraud detection"`. Next: Phase 3,
+the first agent (Tailor) and the fit loop.

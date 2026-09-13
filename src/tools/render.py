@@ -3,7 +3,15 @@
 Roadmap invariant #2 lives here: the page count is *measured* by pypdf
 from the actual artifact, never estimated by a model. Downstream, the
 fit loop and the Judge both read this number instead of asking an LLM
-"does this look like two pages?".
+"does this look like one page?".
+
+Phase 3 addition: `RenderResult.fill` — how many pages' worth of content
+the document holds, as a float (0.92 = fits one page with 8% spare,
+1.04 = one page plus a few lines). Measured from the laid-out HTML in
+print media at the paper's content width, so it's an estimate of the
+same layout Chromium prints; the page count from pypdf stays the hard
+truth. The fit loop uses `fill` to choose a step size and `page_count`
+to decide whether it's done.
 
 Layering:
     build_html()    pure function, no I/O   — schema validation + Jinja
@@ -27,10 +35,18 @@ TEMPLATE_DIR = ROOT / "templates"
 DEFAULT_OUT = ROOT / "output" / "resume.pdf"
 
 # Canonical bounds for the fit loop's knob. 0.80 puts the base font at
-# ~8.4pt — the readability floor. fit.py (Phase 3) imports these instead
-# of inventing its own.
+# ~8.4pt — the readability floor. fit.py imports these instead of
+# inventing its own.
 SCALE_MIN = 0.80
 SCALE_MAX = 1.20
+
+# Paper geometry in CSS pixels (96 dpi), mirroring @page in print.css:
+# A4 = 210 x 297 mm = 794 x 1123 px; margin 0.35in = 33.6px each side.
+# print.css stays the source of truth for *printing*; these are only
+# used to measure fill, and must be changed together with it.
+_PAGE_W, _PAGE_H, _MARGIN = 794, 1123, 33.6
+CONTENT_WIDTH_PX = int(_PAGE_W - 2 * _MARGIN)   # 726
+CONTENT_HEIGHT_PX = _PAGE_H - 2 * _MARGIN       # 1055.8
 
 _env = Environment(
     loader=FileSystemLoader(TEMPLATE_DIR),
@@ -63,14 +79,16 @@ def build_html(data: dict | Resume, scale: float = 1.0) -> str:
 class RenderResult:
     pdf_path: Path
     html_path: Path  # debug artifact: open in a browser when layout looks wrong
-    page_count: int
+    page_count: int  # measured by pypdf — the hard constraint
+    fill: float      # pages' worth of content, measured from layout — the soft signal
+    scale: float
 
 
 class Renderer:
     """Reusable Chromium session.
 
     Browser startup (~1s) dominates render time, and the fit loop renders
-    up to 3-4 times per job — so hold one browser open and reuse it:
+    up to 4 times per job — so hold one browser open and reuse it:
 
         with Renderer() as r:
             result = r.render(data, scale=0.9)
@@ -100,7 +118,15 @@ class Renderer:
 
         page = self._browser.new_page()
         try:
+            # Lay the page out the way print will: print media, paper width.
+            page.set_viewport_size({"width": CONTENT_WIDTH_PX, "height": int(CONTENT_HEIGHT_PX)})
+            page.emulate_media(media="print")
             page.set_content(html, wait_until="load")
+            # Body's laid-out box, not scrollHeight: scrollHeight is floored
+            # at the viewport height, so a page that fits would always read
+            # as "exactly full". print.css zeroes body margins, so this is
+            # the content height.
+            content_height = page.evaluate("document.body.getBoundingClientRect().height")
             # No format/margin args on purpose: prefer_css_page_size hands
             # geometry control to @page in print.css — one source of truth.
             page.pdf(
@@ -115,6 +141,8 @@ class Renderer:
             pdf_path=out,
             html_path=html_path,
             page_count=len(PdfReader(str(out)).pages),
+            fill=content_height / CONTENT_HEIGHT_PX,
+            scale=scale,
         )
 
 
@@ -130,6 +158,7 @@ def render_resume(
 
 
 if __name__ == "__main__":
-    # Phase 1 acceptance command:  python -m src.tools.render
-    pdf_path, pages = render_resume(Resume.load(ROOT / "assets" / "resume.json"))
-    print(f"{pdf_path} — {pages} page(s)")
+    # python -m src.tools.render
+    with Renderer() as r:
+        res = r.render(Resume.load(ROOT / "assets" / "resume.json"))
+    print(f"{res.pdf_path} — {res.page_count} page(s), fill {res.fill:.2f}")

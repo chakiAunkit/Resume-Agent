@@ -71,6 +71,13 @@ def test_pdf_exists_within_page_budget(baseline):
     assert 1 <= baseline.page_count <= 2
 
 
+def test_fill_is_consistent_with_page_count(baseline):
+    """fill is the soft signal, page_count the hard one; they must agree
+    to within a page. The base CV is a full single page: fill in (0.6, 1.3)."""
+    assert baseline.page_count - 1 < baseline.fill < baseline.page_count + 0.3
+    assert baseline.scale == 1.0
+
+
 def test_content_survives_round_trip(baseline, resume):
     """Every load-bearing fact must be extractable from the PDF text.
 
@@ -92,9 +99,11 @@ def test_content_survives_round_trip(baseline, resume):
 
 def test_scale_knob_actually_scales(renderer, resume, baseline, tmp_path_factory):
     """Rendering smaller must never *increase* the page count, and the
-    content must be unchanged — scale is presentation-only."""
+    content must be unchanged — scale is presentation-only. Fill must
+    drop, since that's what the fit loop steers by."""
     out = tmp_path_factory.mktemp("scaled") / "cv_small.pdf"
     result = renderer.render(resume, scale=0.85, out_path=out)
 
     assert result.page_count <= baseline.page_count
+    assert result.fill < baseline.fill
     assert resume.contact.name.lower() in _pdf_text(result.pdf_path)

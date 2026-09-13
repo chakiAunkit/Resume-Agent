@@ -1,0 +1,49 @@
+About the job
+At eBay, we're more than a global ecommerce leader — we're changing the way the world shops and sells. Our platform empowers millions of buyers and sellers in more than 190 markets around the world. We're committed to pushing boundaries and leaving our mark as we reinvent the future of ecommerce for enthusiasts.
+
+Our customers are our compass, authenticity thrives, bold ideas are welcome, and everyone can bring their unique selves to work — every day. We're in this together, sustaining the future of our customers, our company, and our planet.
+
+Join a team of passionate thinkers, innovators, and dreamers — and help us connect people and build communities to create economic opportunity for all.
+
+About Team And Role
+
+We're building the future of eCommerce product discovery, and we need a data-driven, AI-savvy problem solver to help us, do it.
+
+This is a unique role at the intersection of data analytics, AI/ML model evaluation, and prompt engineering—ideal for someone who is just as comfortable writing SQL queries and Python scripts as they are experimenting with LLMs to build analytical solutions.
+
+You'll be embedded in the Product Knowledge org, shaping how we structure and optimize taxonomy, ontology, and catalog data for next-gen search, recommendations, and AI-driven experiences.
+
+This is a high-agency, startup-style role—if you thrive in fast-moving, product-focused environments and love working closely with AI/ML, Product, and Engineering teams, this is for you.
+
+What You'll Do
+
+Analyze & Optimize eCommerce Product Data – Run deep SQL & Python analyses to find opportunities in taxonomy, ontology, and structured data for search & discovery improvements.
+Leverage LLMs for Analytical Solutions – Use prompt engineering techniques to create AI-driven approaches for taxonomy validation, data enrichment, and classification.
+Evaluate & Improve AI/ML Models – Develop systematic evaluation frameworks for product knowledge models, embeddings, and semantic search solutions.
+Drive Insights & Strategy – Use data-driven storytelling to influence product and AI teams, helping shape decisions on catalog optimization, entity resolution, and knowledge graph development.
+Integrate with AI/ML Teams – Work closely with data scientists and engineers to test and refine AI-based classification, search ranking, and recommendation models.
+Prototype and Experiment – Move fast, test hypotheses, and build quick experiments to validate structured data strategies and AI-driven discovery improvements.
+
+
+What We're Looking For
+
+4+ Years experience in analytics, data science role
+Strong Data & Analytics Skills – Proficiency in SQL & Python for data wrangling, analytics, and automation.
+Product Analytics Attitude – Familiarity with eCommerce search, recommendations, and knowledge graph applications
+Strong Communication – Ability to turn complex findings into actionable recommendations for Product, AI, and Engineering teams.
+AI/LLM Experience – Hands-on experience with LLMs, prompt engineering, and retrieval-augmented generation (RAG) for AI-powered insights (Preferred)
+Model Evaluation Know-How – Ability to define metrics and evaluation frameworks for assessing ML-driven taxonomy and classification models..
+Startup DNA – High agency, thrive in fast-paced, iterative environments with deep cross-functional collaboration.
+
+
+Why Join Us?
+
+Build the AI-powered future of eCommerce product discovery.
+Move fast & own impactful projects in a startup-like, high-agency culture.
+Work directly with AI, Data Science, and Product teams to shape taxonomy & ontology strategies.
+Get hands-on with AI/ML in a real-world, high-scale environment.
+
+
+Additional Details
+
+eBay is an equal opportunity employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, national origin, sex, sexual orientation, gender identity, veteran status, and disability, or other legally protected status. If you have a need that requires accommodation, please contact us at talent@ebay.com. We will make every effort to respond to your request for accommodation as soon as possible. View our accessibility statement to learn more about eBay's commitment to ensuring digital accessibility for people with disabilities.

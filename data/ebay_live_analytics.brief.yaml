@@ -1,0 +1,51 @@
+# ebay_live_analytics.brief.yaml — hand-written brief for data/ebay_live_analytics.txt.
+# Eval case 002 (data/eval/README.md). Schema: src/brief.py; conventions in
+# data/sample_jd.brief.yaml.
+#
+# Notes on this one:
+#   * "4–8 years" -> years_experience: 4 (the floor is the constraint)
+#   * "behavioral, transactional, or event-level data": three names for one
+#     requirement; "transactional data" is the phrasing the evidence can
+#     honestly cover (60M+ customer orders), so that's the must-have
+#   * causal inference is listed as both required ("causal measurement")
+#     and preferred ("causal inference or advanced experimentation"); it
+#     goes in must_haves once, not in both
+#   * "segmentation" alone matched image segmentation (a publication); a
+#     keyword scorer cannot tell the two apart, so the brief says which
+#   * instrumentation / event tracking is a real requirement with no
+#     evidence behind it. It stays in: the Judge should report the gap.
+
+title: Data Scientist (Analytics)
+company: eBay
+seniority: mid
+years_experience: 4
+
+must_haves:
+  - SQL
+  - Python
+  - product analytics
+  - A/B testing
+  - experimental design
+  - hypothesis testing
+  - causal inference
+  - KPIs
+  - transactional data
+  - funnel analysis
+  - customer segmentation
+  - dashboards
+  - instrumentation
+
+nice_to_haves:
+  - e-commerce
+  - marketplaces
+  - real-time products
+  - machine learning
+  - personalization
+  - recommendations
+  - rapidly scaling product
+  - AI automation
+
+soft_skills:
+  - structuring ambiguous questions
+  - clear product recommendations
+  - cross-functional collaboration

@@ -1,0 +1,54 @@
+# sample_jd.brief.yaml — hand-written brief for data/sample_jd.txt.
+#
+# Phase 3: written by hand. Phase 4: written by the Extractor agent from
+# the raw JD, in exactly this shape. Schema: src/brief.py.
+#
+# Conventions:
+#   * one concept per must-have, tag-sized — a requirement is the evidence
+#     query and the Judge's coverage checklist, and coverage is strict
+#     (every token must match one atom). "e-commerce search and
+#     recommendations" is JD rhetoric bundling three things; it can never
+#     be covered. "e-commerce" and "recommendations" can.
+#   * mirror the JD's own vocabulary; the Tailor will echo these words
+#   * "Preferred" in the JD -> nice_to_haves, even when it's our strongest
+#     match (the brief records what the job asked for, not what we have)
+#   * the "4+ years" requirement lives in years_experience, not
+#     must_haves: it's a constraint to check, not a keyword to retrieve on
+#   * soft skills (communication, collaboration, "startup DNA") go in
+#     soft_skills: a phrasing requirement, not an evidence requirement,
+#     so it must not compete with technical must-haves in retrieval
+
+title: Data Scientist
+company: eBay
+seniority: mid
+years_experience: 4
+
+must_haves:
+  - SQL
+  - Python
+  - data analytics
+  - e-commerce
+  - recommendations
+  - knowledge graph
+  - taxonomy
+  - ontology
+  - product catalog
+  - LLMs
+  - prompt engineering
+  - model evaluation
+  - classification
+
+nice_to_haves:
+  - retrieval-augmented generation (RAG)
+  - embeddings
+  - semantic search
+  - entity resolution
+  - data enrichment
+  - search ranking
+  - experimentation
+
+# Retrieval ignores these; the Tailor and Judge don't.
+soft_skills:
+  - data-driven storytelling
+  - cross-functional collaboration
+  - high agency

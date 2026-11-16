@@ -47,7 +47,47 @@ def synthetic() -> Profile:
 # ---------------------------------------------------------------- scoring
 
 def test_tokenize_drops_stopwords_and_keeps_compound_tokens():
-    assert tokenize("Built the 1D-CNN with scikit-learn.") == ["built", "1d-cnn", "scikit-learn"]
+    # compounds stay one token; since keyword v6 their inner hyphen is dropped
+    assert tokenize("Built the 1D-CNN with scikit-learn.") == ["built", "1dcnn", "scikitlearn"]
+
+
+def test_tokenize_collapses_hyphens_so_spellings_meet():
+    """The case that motivated keyword v6: the briefs say "eCommerce" (the
+    JD's spelling) and the atoms are tagged "e-commerce"."""
+    assert tokenize("e-commerce") == tokenize("eCommerce") == tokenize("ecommerce") == ["ecommerce"]
+    assert tokenize("real-time products") == tokenize("realtime products")
+
+
+def test_tokenize_keeps_a_hyphen_between_digits():
+    """"3-5" is a range; fusing it to "35" would invent a number."""
+    assert tokenize("3-5 years") == ["3-5", "year"]
+    assert tokenize("COVID-19 and 4-way") == ["covid19", "4way"]
+
+
+def test_tokenize_aliases_one_concept_slash_terms():
+    assert tokenize("A/B testing") == tokenize("AB testing") == ["ab", "testing"]
+    assert tokenize("A/B tests") == ["ab", "test"]
+    assert tokenize("CI/CD") == ["cicd"]
+
+
+def test_tokenize_slash_still_separates_everything_else():
+    """No slash rule: "AI/ML" and "SQL/Python" are two requirements each."""
+    assert tokenize("AI/ML") == ["ai", "ml"]
+    assert tokenize("SQL/Python") == ["sql", "python"]
+
+
+def test_hyphenated_tag_covers_unhyphenated_requirement():
+    """End to end through retrieval: coverage is strict (every token must
+    match), so before v6 an atom tagged "e-commerce" covered nothing
+    asked as "eCommerce", and "A/B testing" matched on "testing" alone."""
+    prof = Profile.model_validate({"atoms": [
+        _atom("shop", keywords=["e-commerce"]),
+        _atom("exp", skills=["A/B testing"]),
+    ]})
+    hits = {h.atom.id: h for h in retrieve_for_brief(
+        JobBrief(title="t", company="c", must_haves=["eCommerce", "AB testing"]), profile=prof)}
+    assert hits["shop"].covers == ("eCommerce",)
+    assert hits["exp"].covers == ("AB testing",)
 
 
 def test_tokenize_normalises_plurals_symmetrically():
@@ -179,7 +219,7 @@ def test_supply_chain_returns_target():
 
 @needs_real
 def test_sample_brief_surfaces_insight_store():
-    """Eval case 001 (data/eval/README.md): the knowledge-graph RAG atom
+    """Eval case 001 (data/evals/README.md): the knowledge-graph RAG atom
     must be in the top 3 for the eBay Product Knowledge brief."""
     hits = retrieve_for_brief(JobBrief.load(SAMPLE_BRIEF), k=8)
     ids = [h.atom.id for h in hits]

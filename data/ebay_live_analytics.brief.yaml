@@ -1,19 +1,46 @@
 # ebay_live_analytics.brief.yaml — hand-written brief for data/ebay_live_analytics.txt.
-# Eval case 002 (data/eval/README.md). Schema: src/brief.py; conventions in
-# data/sample_jd.brief.yaml.
+# Eval case 002 (data/evals/README.md). Schema: src/brief.py.
 #
-# Notes on this one:
-#   * "4–8 years" -> years_experience: 4 (the floor is the constraint)
-#   * "behavioral, transactional, or event-level data": three names for one
-#     requirement; "transactional data" is the phrasing the evidence can
-#     honestly cover (60M+ customer orders), so that's the must-have
-#   * causal inference is listed as both required ("causal measurement")
-#     and preferred ("causal inference or advanced experimentation"); it
-#     goes in must_haves once, not in both
-#   * "segmentation" alone matched image segmentation (a publication); a
-#     keyword scorer cannot tell the two apart, so the brief says which
-#   * instrumentation / event tracking is a real requirement with no
-#     evidence behind it. It stays in: the Judge should report the gap.
+# ALIGNED to the Extractor's rules (src/agents/extractor.py SYSTEM_PROMPT),
+# so the eval is apples to apples: the reference obeys the same rules the
+# model is given. Rules applied here:
+#   * must_haves = every technical requirement named anywhere, including
+#     the responsibilities. nice_to_haves = ONLY what "Preferred
+#     Qualifications" marks. Both required and preferred -> must_have
+#     (causal inference, segmentation).
+#   * every member of a list is its own item (statistics / experimental
+#     design / hypothesis testing; funnels / cohorts / segmentation /
+#     behavioral analysis; instrumentation / event tracking / data quality)
+#   * the JD's own words: "funnels", not "funnel analysis"; "segmentation",
+#     not "customer segmentation"
+#   * no bare generic words ("advanced measurement approaches", "other
+#     statistical techniques") and no umbrella labels
+#   * requirements section first, then requirements implied by the
+#     responsibilities
+#
+#   * a sentence describing what the role does counts as a responsibility:
+#     "shape the buyer experience through product analytics and
+#     experimentation" makes experimentation a must_have — the same reading
+#     that gives case 001 "data analytics" from its intro
+#   * cross-list near-duplicates are allowed; only exact duplicates are not.
+#     "experimentation" (required, intro) and "advanced experimentation"
+#     (Preferred line, trailing "methodologies" dropped) are both kept
+#
+# Revised 2026-09-20 after the first 3-run eval (M1): added "advanced
+# experimentation" and "analytics workflows" to nice_to_haves — both
+# Preferred-line list members the alignment missed; the model extracted
+# them in 3/3 runs.
+#
+# Deliberately NOT items:
+#   * buyer-journey stages (discovery, viewing, engagement, bidding,
+#     purchasing, retention) — product areas, not requirements
+#   * "statistical rigor", "clear decision criteria" — manner, not skill
+#   * "data science" as a role category (the years line)
+#
+# Known consequence: "segmentation" also matches the brain-tumour
+# segmentation publication. That polysemy is the keyword scorer's problem
+# and is already logged for the retrieval experiment; the brief no longer
+# works around it.
 
 title: Data Scientist (Analytics)
 company: eBay
@@ -21,31 +48,55 @@ seniority: mid
 years_experience: 4
 
 must_haves:
+  # Required Qualifications
   - SQL
   - Python
   - product analytics
   - A/B testing
+  - statistics
   - experimental design
   - hypothesis testing
-  - causal inference
-  - KPIs
+  - behavioral data
   - transactional data
-  - funnel analysis
-  - customer segmentation
+  - event-level data
+  # Key Responsibilities
+  - experimentation
+  - success metrics
+  - KPIs
+  - guardrails
+  - controlled experiments
+  - causal inference
+  - quasi-experimental methods
+  - funnels
+  - cohorts
+  - segmentation
+  - behavioral analysis
   - dashboards
+  - measurement frameworks
+  - self-service analytics
   - instrumentation
+  - event tracking
+  - data quality
 
 nice_to_haves:
   - e-commerce
   - marketplaces
+  - consumer technology
   - real-time products
+  - advanced experimentation
   - machine learning
   - personalization
   - recommendations
+  - early-stage product
   - rapidly scaling product
-  - AI automation
+  - AI
+  - automation
+  - analytics workflows
 
+# Retrieval ignores these; the Tailor and Judge don't.
 soft_skills:
+  - analytical problem-solving
   - structuring ambiguous questions
+  - communication
   - clear product recommendations
   - cross-functional collaboration

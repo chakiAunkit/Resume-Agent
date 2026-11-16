@@ -18,6 +18,10 @@ Scoring rules (deliberately simple):
   * Query and fields are tokenised the same way; stopwords dropped;
     trailing plural "s" stripped on both sides (models == model,
     LLMs == LLM) — symmetric, so it never creates a mismatch.
+  * Hyphens inside a word are dropped (keyword v6), so "e-commerce",
+    "eCommerce" and "ecommerce" are one token. Slashes still separate
+    ("AI/ML" is two things); the few slash terms that name one thing
+    ("A/B testing") are spelled out in ALIASES instead.
   * A query term counts once per field it appears in (presence, not
     frequency) so long summaries can't out-score precise tags.
   * Fields are weighted: curated tags (`keywords`, `skills`) dominate,
@@ -58,8 +62,29 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILE = ROOT / "data" / "profile.yaml"
 
 # Tokens keep inner + . # - so "1d-cnn", "c++", "scikit-learn", "qwen2.5"
-# survive; leading/trailing punctuation is stripped.
+# survive as one token; leading/trailing punctuation is stripped. The
+# inner hyphen is then removed by _INNER_HYPHEN.
 _TOKEN = re.compile(r"[a-z0-9][a-z0-9+.#-]*[a-z0-9+#]|[a-z0-9]")
+
+# A hyphen inside a word is spelling, not structure: "e-commerce",
+# "eCommerce" and "ecommerce" name one thing, so all three become
+# "ecommerce". Removing the hyphen (rather than splitting on it) is what
+# makes the unhyphenated spelling match. One exception: a hyphen between
+# two digits is a range ("3-5"), and fusing it would invent a number.
+_INNER_HYPHEN = re.compile(r"(?<!\d)-+|-+(?!\d)")
+
+# Spellings of one term that the token rules would otherwise break up.
+# Applied to the lower-cased text before tokenising. The default stays
+# "a slash separates" — "AI/ML" and "SQL/Python" are two requirements
+# each — so a slash term that is ONE concept is listed here rather than
+# changing the rule. Without the entry, "A/B testing" tokenises to
+# ["b", "testing"]: "a" is a stopword.
+# Spellings only, never synonyms: "A/B testing" is not "experimentation".
+# Meaning-level matching is the embedding experiment's job, not this table's.
+ALIASES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<![a-z0-9])a/b(?![a-z0-9])"), "ab"),       # A/B, AB testing
+    (re.compile(r"(?<![a-z0-9])ci/cd(?![a-z0-9])"), "cicd"),   # CI/CD, CICD
+)
 
 STOPWORDS = frozenset(
     "a an and are as at be by for from in into is it of on or that the this "
@@ -96,11 +121,15 @@ def _singular(token: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
-    return [
-        _singular(t)
-        for t in _TOKEN.findall(text.lower())
-        if t not in STOPWORDS
-    ]
+    """Lower-case -> aliases -> tokens -> drop inner hyphens -> drop
+    stopwords -> singularise. Every consumer (retrieval, the Tailor's
+    skill check, the Extractor's repair/verify, the eval's matching key)
+    goes through this one function, so the rules stay symmetric."""
+    text = text.lower()
+    for pattern, replacement in ALIASES:
+        text = pattern.sub(replacement, text)
+    tokens = (_INNER_HYPHEN.sub("", t) for t in _TOKEN.findall(text))
+    return [_singular(t) for t in tokens if t not in STOPWORDS]
 
 
 @dataclass(frozen=True)

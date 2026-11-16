@@ -1,22 +1,42 @@
 # sample_jd.brief.yaml — hand-written brief for data/sample_jd.txt.
+# Eval case 001 (data/evals/README.md). Schema: src/brief.py.
 #
-# Phase 3: written by hand. Phase 4: written by the Extractor agent from
-# the raw JD, in exactly this shape. Schema: src/brief.py.
+# ALIGNED to the Extractor's rules (src/agents/extractor.py SYSTEM_PROMPT),
+# so the eval is apples to apples: the reference obeys the same rules the
+# model is given. Rules applied here:
+#   * must_haves = every technical requirement named anywhere, including
+#     "What You'll Do". nice_to_haves = ONLY what the JD marks "(Preferred)".
+#     LLMs and prompt engineering appear in the responsibilities too, so
+#     they are must_haves; RAG appears only on the Preferred line.
+#   * every member of a list is its own item (taxonomy validation / data
+#     enrichment / classification; data wrangling / automation; embeddings /
+#     semantic search)
+#   * the JD's own spelling: "eCommerce", not "e-commerce"
+#   * drop a trailing generic noun that adds nothing: "recommendation
+#     models" -> "recommendations", "knowledge graph development" ->
+#     "knowledge graph". A generic word that is *qualified* stays:
+#     "catalog data", like case 002's "behavioral data"
+#   * no bare generic words ("metrics", "analytics", "AI/ML", "product
+#     knowledge models", "analytical solutions")
+#   * activities become nouns: "prototype and experiment" -> "prototyping",
+#     "experimentation"; "test hypotheses" -> "hypothesis testing"
+#   * requirements section ("What We're Looking For") first, then the
+#     responsibilities
 #
-# Conventions:
-#   * one concept per must-have, tag-sized — a requirement is the evidence
-#     query and the Judge's coverage checklist, and coverage is strict
-#     (every token must match one atom). "e-commerce search and
-#     recommendations" is JD rhetoric bundling three things; it can never
-#     be covered. "e-commerce" and "recommendations" can.
-#   * mirror the JD's own vocabulary; the Tailor will echo these words
-#   * "Preferred" in the JD -> nice_to_haves, even when it's our strongest
-#     match (the brief records what the job asked for, not what we have)
-#   * the "4+ years" requirement lives in years_experience, not
-#     must_haves: it's a constraint to check, not a keyword to retrieve on
-#   * soft skills (communication, collaboration, "startup DNA") go in
-#     soft_skills: a phrasing requirement, not an evidence requirement,
-#     so it must not compete with technical must-haves in retrieval
+# Revised 2026-09-20 after six runs (M2 + M4): "catalog" -> "catalog data";
+# added "catalog optimization" (the list "catalog optimization, entity
+# resolution, and knowledge graph development" had been taken 2 of 3) and
+# "evaluation frameworks" (parallel to case 002's "measurement frameworks").
+# The model extracted both additions in 6/6 runs.
+#
+# Deliberately NOT items:
+#   * "discovery" — a product area, not a requirement (same call as the
+#     buyer-journey stages in case 002)
+#   * section headings ("Product Analytics Attitude", "Startup DNA")
+#
+# Known consequence: "eCommerce" does not match atoms tagged "e-commerce"
+# until tokenize() collapses the hyphen. That is the next deliverable; the
+# brief records what the JD asks, not what the scorer can currently match.
 
 title: Data Scientist
 company: eBay
@@ -24,31 +44,44 @@ seniority: mid
 years_experience: 4
 
 must_haves:
+  # What We're Looking For
   - SQL
   - Python
-  - data analytics
-  - e-commerce
+  - data wrangling
+  - automation
+  - eCommerce
+  - search
   - recommendations
   - knowledge graph
-  - taxonomy
-  - ontology
-  - product catalog
   - LLMs
   - prompt engineering
   - model evaluation
+  - evaluation frameworks
   - classification
+  # About the role + What You'll Do
+  - data analytics
+  - taxonomy
+  - ontology
+  - catalog data
+  - structured data
+  - taxonomy validation
+  - data enrichment
+  - embeddings
+  - semantic search
+  - catalog optimization
+  - entity resolution
+  - search ranking
+  - prototyping
+  - experimentation
+  - hypothesis testing
 
 nice_to_haves:
   - retrieval-augmented generation (RAG)
-  - embeddings
-  - semantic search
-  - entity resolution
-  - data enrichment
-  - search ranking
-  - experimentation
 
 # Retrieval ignores these; the Tailor and Judge don't.
 soft_skills:
   - data-driven storytelling
+  - communication
   - cross-functional collaboration
   - high agency
+  - fast-paced environments

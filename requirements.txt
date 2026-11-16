@@ -11,4 +11,5 @@ pypdf
 httpx
 pytest
 rich
-# sentence-transformers   # uncomment at the ranking phase (~2GB with torch)
+openai
+sentence-transformers   # Ranker stage 1; pulls in PyTorch (~2 GB). The CPU build is enough; see README for CUDA.

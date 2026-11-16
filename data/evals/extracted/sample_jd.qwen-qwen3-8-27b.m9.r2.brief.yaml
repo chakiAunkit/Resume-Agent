@@ -1,0 +1,38 @@
+# extracted from sample_jd.txt by qwen/qwen3.8-27b (run 2; effort medium, reasoning hidden, T 1, top_p 0.95, max_tokens 4096)
+title: Data Scientist
+company: eBay
+must_haves:
+- SQL
+- Python
+- data wrangling
+- automation
+- taxonomy
+- ontology
+- structured data
+- search
+- discovery
+- prompt engineering
+- taxonomy validation
+- data enrichment
+- classification
+- evaluation frameworks
+- embeddings
+- semantic search
+- data storytelling
+- catalog optimization
+- entity resolution
+- knowledge graph
+- search ranking
+- recommendations
+- LLMs
+- hypothesis testing
+- experimentation
+- eCommerce
+nice_to_haves:
+- retrieval-augmented generation (RAG)
+soft_skills:
+- communication
+- cross-functional collaboration
+- high agency
+seniority: mid
+years_experience: 4

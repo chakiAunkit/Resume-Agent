@@ -1,0 +1,39 @@
+# extracted from sample_jd.txt by openai/gpt-oss-120b (run 2)
+title: Data Scientist
+company: eBay
+must_haves:
+- SQL
+- Python
+- data wrangling
+- automation
+- search
+- recommendations
+- knowledge graph
+- taxonomy
+- ontology
+- structured data
+- discovery
+- LLMs
+- prompt engineering
+- taxonomy validation
+- data enrichment
+- classification
+- evaluation frameworks
+- product knowledge models
+- embeddings
+- semantic search
+- catalog optimization
+- entity resolution
+- data-driven storytelling
+- search ranking
+- experiments
+- hypothesis testing
+nice_to_haves:
+- retrieval-augmented generation
+- RAG
+soft_skills:
+- communication
+- high agency
+- cross-functional collaboration
+seniority: mid
+years_experience: 4

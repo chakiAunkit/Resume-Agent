@@ -1,0 +1,52 @@
+# extracted from ebay_live_analytics.txt by openai/gpt-oss-120b (run 4)
+title: Data Scientist (Analytics)
+company: eBay
+must_haves:
+- SQL
+- Python
+- product analytics
+- A/B testing
+- statistics
+- experimental design
+- hypothesis testing
+- causal measurement
+- behavioral data
+- transactional data
+- event-level data
+- success metrics
+- KPIs
+- guardrails
+- controlled experiments
+- causal inference
+- quasi-experimental methods
+- funnels
+- cohorts
+- segmentation
+- behavioral analysis
+- dashboards
+- measurement frameworks
+- self-service analytics
+- instrumentation
+- event tracking
+- data quality
+nice_to_haves:
+- e-commerce
+- marketplaces
+- consumer technology
+- real-time products
+- advanced experimentation
+- machine learning
+- personalization
+- recommendation
+- early-stage product
+- rapidly scaling
+- AI
+- automation
+- analytics workflows
+soft_skills:
+- communication
+- analytical problem solving
+- cross-functional collaboration
+- structured thinking
+seniority: mid
+years_experience: 4

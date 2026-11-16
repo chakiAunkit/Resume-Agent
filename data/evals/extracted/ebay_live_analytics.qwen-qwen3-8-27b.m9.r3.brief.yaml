@@ -1,0 +1,46 @@
+# extracted from ebay_live_analytics.txt by qwen/qwen3.8-27b (run 3; effort medium, reasoning hidden, T 1, top_p 0.95, max_tokens 4096)
+title: Data Scientist (Analytics)
+company: eBay
+must_haves:
+- product analytics
+- A/B testing
+- causal measurement
+- quasi-experimental methods
+- behavioral data
+- transactional data
+- event-level data
+- hypothesis testing
+- experimental design
+- product analysis
+- causal inference
+- cohort analysis
+- segmentation
+- behavioral analysis
+- funnel analysis
+- dashboards
+- measurement frameworks
+- self-service analytics
+- instrumentation
+- event tracking
+- data quality
+- statistics
+nice_to_haves:
+- e-commerce
+- marketplaces
+- consumer technology
+- real-time products
+- advanced experimentation
+- machine learning
+- personalization
+- recommendation
+- early-stage
+- rapidly scaling
+- AI
+- automation
+soft_skills:
+- analytical problem-solving
+- structuring ambiguous questions
+- communication
+- cross-functional collaboration
+seniority: mid
+years_experience: 4

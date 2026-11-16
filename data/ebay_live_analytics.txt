@@ -1,0 +1,52 @@
+Title - Data Scientist (Analytics)
+
+About the job
+At eBay, we're more than a global ecommerce leader — we’re changing the way the world shops and sells. Our platform empowers millions of buyers and sellers in more than 190 markets around the world. We’re committed to pushing boundaries and leaving our mark as we reinvent the future of ecommerce for enthusiasts.
+
+Our customers are our compass, authenticity thrives, bold ideas are welcome, and everyone can bring their unique selves to work — every day. We're in this together, sustaining the future of our customers, our company, and our planet.
+
+Join a team of passionate thinkers, innovators, and dreamers — and help us connect people and build communities to create economic opportunity for all.
+
+We are seeking a Data Scientist (Analytics) to join the eBay Live Buyer Experience team, supporting eBay’s real-time livestream shopping experience across categories such as Collectibles, Luxury, Sneakers, and Apparel.
+
+As eBay Live continues to scale, this role will help shape the buyer experience through product analytics and experimentation. You will partner closely with Product, Engineering, Design, and business teams to understand buyer behavior, evaluate new experiences, and identify opportunities to improve discovery, engagement, conversion, and retention.
+
+This is a hands-on individual contributor role for someone who enjoys working with large behavioral datasets, designing rigorous experiments, and translating analysis into actionable product recommendations.
+
+Key Responsibilities
+
+Own product analytics for key areas of the eBay Live buyer journey, including discovery, viewing, engagement, bidding, purchasing, and retention.
+Partner with Product and Engineering teams to define success metrics, KPIs, and guardrails for new features and experiences.
+Design, analyze, and interpret A/B tests and controlled experiments, ensuring statistical rigor and clear decision criteria.
+Apply advanced measurement approaches, including causal inference and quasi-experimental methods, when traditional A/B testing is not feasible.
+Conduct deep-dive product analyses using funnels, cohorts, segmentation, behavioral analysis, and other statistical techniques.
+Identify friction points and growth opportunities across the buyer journey and translate findings into actionable product recommendations.
+Build scalable dashboards, measurement frameworks, and self-service analytics that enable faster product decision-making.
+Partner with engineering teams to improve instrumentation, event tracking, and data quality.
+Communicate analytical findings clearly to Product, Engineering, Design, and business stakeholders.
+
+
+Required Qualifications
+
+4–8 years of experience in data science, product analytics, or related analytics roles.
+Strong proficiency in SQL and Python.
+Strong hands-on experience with product analytics and A/B testing.
+Solid understanding of statistics, experimental design, hypothesis testing, and causal measurement.
+Experience analyzing large-scale behavioral, transactional, or event-level data.
+Strong analytical problem-solving skills and ability to structure ambiguous questions.
+Strong communication skills and ability to translate complex analysis into clear product recommendations.
+Experience working effectively with cross-functional Product and Engineering teams.
+
+
+Preferred Qualifications
+
+Experience with e-commerce, marketplaces, consumer technology, or real-time products.
+Experience with causal inference or advanced experimentation methodologies.
+Exposure to machine learning, segmentation, personalization, or recommendation use cases.
+Experience working in an early-stage or rapidly scaling product environment.
+Interest in leveraging AI and automation to improve analytics workflows.
+
+
+Additional Details
+
+eBay is an equal opportunity employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, national origin, sex, sexual orientation, gender identity, veteran status, and disability, or other legally protected status. If you have a need that requires accommodation, please contact us at talent@ebay.com. We will make every effort to respond to your request for accommodation as soon as possible. View our accessibility statement to learn more about eBay's commitment to ensuring digital accessibility for people with disabilities.

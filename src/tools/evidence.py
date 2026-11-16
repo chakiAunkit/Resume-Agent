@@ -16,8 +16,9 @@ Why keyword matching, not embeddings (yet):
 
 Scoring rules (deliberately simple):
   * Query and fields are tokenised the same way; stopwords dropped;
-    trailing plural "s" stripped on both sides (models == model,
-    LLMs == LLM) — symmetric, so it never creates a mismatch.
+    plurals reduced on both sides (models == model, LLMs == LLM,
+    processes == process, technologies == technology, analyses ==
+    analysis) — symmetric, so it never creates a mismatch.
   * Hyphens inside a word are dropped (keyword v6), so "e-commerce",
     "eCommerce" and "ecommerce" are one token. Slashes still separate
     ("AI/ML" is two things); the few slash terms that name one thing
@@ -107,17 +108,40 @@ PHRASE_BONUS = 2.0
 NICE_TO_HAVE_WEIGHT = 0.5
 
 
-def _singular(token: str) -> str:
-    """Strip a trailing plural 's' (models -> model, llms -> llm).
+# Plurals whose singular ends in "e", so the "-es" / "-ies" rules in
+# _singular() would cut one letter too many: "caches" is "cache" + s, not
+# "cach" + es. They take the plain strip-the-s rule instead.
+_PLAIN_S = frozenset({"caches", "niches", "series", "species", "cookies", "movies"})
 
-    Deliberately crude: no stemmer, no irregulars. It is applied to both
-    the query and the fields, so "analytics" -> "analytic" on both sides
-    still matches — symmetry is what makes crude safe. Three-letter
-    tokens ("aws", "k8s") and "-ss" words ("class") are left alone.
+
+def _singular(token: str) -> str:
+    """Reduce a plural to the form its singular reduces to.
+
+    Still crude, and still no stemmer: the output need not be a word, it
+    only has to be the SAME string for a singular and its plural, because
+    the function is applied to both the query and the fields. "analytics"
+    -> "analytic" on both sides matches. Three-letter tokens ("aws",
+    "k8s") and "-ss" words ("class") are left alone.
+
+    The plain rule strips a trailing "s" (models -> model). That alone
+    breaks the plurals that add more than an "s", so those families come
+    first:
+      processes, indexes, batches, hashes -> drop "es"  (process, index, ...)
+      technologies, anomalies             -> "ies" becomes "y"
+      analyses, hypotheses                -> the form "analysis" /
+                                             "hypothesis" reduce to
+    Before this, "processes" became "processe" and never matched "process".
     """
-    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
-        return token[:-1]
-    return token
+    if len(token) <= 3 or token.endswith("ss"):
+        return token
+    if token not in _PLAIN_S:
+        if token.endswith(("yses", "eses")):
+            return token[:-2] + "i"          # "analysis" -> "analysi" by the plain rule below
+        if token.endswith(("sses", "xes", "ches", "shes")):
+            return token[:-2]
+        if token.endswith("ies") and len(token) > 4:
+            return token[:-3] + "y"
+    return token[:-1] if token.endswith("s") else token
 
 
 def tokenize(text: str) -> list[str]:

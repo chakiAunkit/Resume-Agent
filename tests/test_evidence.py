@@ -99,6 +99,27 @@ def test_tokenize_normalises_plurals_symmetrically():
     assert search("recommendation", profile=prof)[0].atom.id == "plural"
 
 
+@pytest.mark.parametrize("plural, singular", [
+    ("processes", "process"), ("businesses", "business"),      # -sses
+    ("indexes", "index"), ("batches", "batch"), ("hashes", "hash"),
+    ("technologies", "technology"), ("anomalies", "anomaly"), ("queries", "query"),
+    ("analyses", "analysis"), ("hypotheses", "hypothesis"),
+    ("caches", "cache"), ("cookies", "cookie"),                # singular ends in "e": plain rule
+    ("pipelines", "pipeline"), ("use cases", "use case"),      # the plain rule is unchanged
+])
+def test_plural_and_singular_reduce_to_the_same_token(plural, singular):
+    """Plurals that add more than an "s" used to keep a stray letter
+    ("processes" -> "processe") and never matched their singular."""
+    assert tokenize(plural) == tokenize(singular)
+
+
+def test_es_plural_in_a_requirement_is_covered_by_a_singular_tag():
+    prof = Profile.model_validate({"atoms": [_atom("etl", keywords=["batch process", "anomaly detection"])]})
+    hits = retrieve_for_brief(
+        JobBrief(title="t", company="c", must_haves=["batch processes", "anomalies"]), profile=prof)
+    assert hits[0].covers == ("batch processes", "anomalies")       # every token of each matched
+
+
 def test_curated_tags_outrank_prose(synthetic):
     ids = [h.atom.id for h in search("fraud detection", k=10, profile=synthetic)]
     assert ids.index("tagged") < ids.index("prose-only")

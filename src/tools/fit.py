@@ -39,8 +39,10 @@ agent: `fit()` knows nothing about Claude; the CLI wires
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -212,11 +214,53 @@ def _bullet_count(resume: Resume) -> int:
     return sum(len(e.bullets) for e in resume.experience) + len(resume.projects)
 
 
+# Files a failed run leaves beside where the PDF would have gone. A later
+# successful run removes them, so their presence always means "the last run
+# for this brief failed".
+FAILURE_FILES = ("error.json", "rejected_output.txt", "resume.unfitted.json", "changes.unfitted.json")
+
+
+def record_failure(out_dir: Path, stage: str, exc: BaseException, usage: dict[str, int], *,
+                   tailored: Resume | None = None, changes: list | None = None) -> Path:
+    """Write what is known about a failed run to `out_dir`; return error.json.
+
+    A failed run used to leave an empty folder (the Tailor failed before any
+    render) or a stray over-length PDF (the fit loop gave up), and nothing
+    saying which or why. This records:
+      error.json             the stage ("tailor" or "fit"), the error, its
+                             list of problems if it has one, tokens spent
+      rejected_output.txt    the model's last rejected answer, when the error
+                             carries one (TailorError.last_output)
+      resume.unfitted.json   the Tailor's accepted resume, when the failure
+      changes.unfitted.json  came after tailoring: the work is not lost
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    error = out_dir / "error.json"
+    error.write_text(json.dumps({
+        "stage": stage,
+        "error": type(exc).__name__,
+        "message": str(exc),
+        "problems": list(getattr(exc, "problems", []) or []),
+        "tokens": dict(usage),
+        "failed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }, indent=2, ensure_ascii=False), encoding="utf-8")
+    last_output = getattr(exc, "last_output", None)
+    if last_output:
+        (out_dir / "rejected_output.txt").write_text(last_output, encoding="utf-8")
+    if tailored is not None:
+        (out_dir / "resume.unfitted.json").write_text(
+            tailored.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
+        (out_dir / "changes.unfitted.json").write_text(
+            json.dumps([c.model_dump() for c in changes or []], indent=2), encoding="utf-8")
+    return error
+
+
 if __name__ == "__main__":
     # Phase 3 acceptance — one command, JD brief -> tailored, fitted PDF:
     #   python -m src.tools.fit --brief data/sample_jd.brief.yaml
     import argparse
-    import json
+    import sys
+    from typing import NoReturn
 
     from dotenv import load_dotenv
 
@@ -234,11 +278,16 @@ if __name__ == "__main__":
     ap.add_argument("--profile", default=ROOT / "data" / "profile.yaml")
     ap.add_argument("--out", default=None, help="default: output/<brief stem>/resume.pdf")
     ap.add_argument("--pages", type=int, default=1)
-    ap.add_argument("--model", default=tailor_agent.DEFAULT_MODEL)
-    ap.add_argument("--effort", default=tailor_agent.DEFAULT_EFFORT)
+    ap.add_argument("--model", default=None,
+                    help=f"default: TAILOR_MODEL, else {tailor_agent.DEFAULT_MODEL}")
+    ap.add_argument("--effort", default=None,
+                    help=f"default: TAILOR_EFFORT, else {tailor_agent.DEFAULT_EFFORT}")
     ap.add_argument("--no-expand", action="store_true",
                     help="don't ask the Tailor to fill leftover room (saves up to 2 Claude calls)")
     args = ap.parse_args()
+    # Resolved after load_dotenv(), so a TAILOR_MODEL / TAILOR_EFFORT in .env counts.
+    args.model = args.model or tailor_agent.default_model()
+    args.effort = args.effort or tailor_agent.default_effort()
 
     brief = JobBrief.load(args.brief)
     base = Resume.load(args.resume)
@@ -247,11 +296,33 @@ if __name__ == "__main__":
     out = Path(args.out) if args.out else ROOT / "output" / Path(args.brief).stem.replace(".brief", "") / "resume.pdf"
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    usage = {"input_tokens": 0, "output_tokens": 0}
+
+    def fail(stage: str, exc: Exception, tailored: Resume | None = None, changes: list | None = None) -> NoReturn:
+        """Record the failure in the output folder, then stop. The two errors
+        that are results — the Tailor's answer rejected twice, the page budget
+        not met — exit with their message; anything else (an API error, a
+        bug) keeps its traceback."""
+        spent = dict(usage)
+        lost = getattr(exc, "usage", None)          # tokens the failed call itself used
+        if isinstance(lost, dict):
+            for key, n in lost.items():
+                spent[key] = spent.get(key, 0) + n
+        path = record_failure(out.parent, stage, exc, spent, tailored=tailored, changes=changes)
+        print(f"FAILED at the {stage} stage ({type(exc).__name__}); details in {path}")
+        if isinstance(exc, (tailor_agent.TailorError, FitError)):
+            print(exc)
+            sys.exit(1)
+        raise exc
+
     print(f"brief: {brief.title} @ {brief.company} — {len(hits)} atoms, target {args.pages} page(s)")
-    t = tailor_agent.tailor(base, brief, hits, model=args.model, effort=args.effort, max_pages=args.pages)
+    try:
+        t = tailor_agent.tailor(base, brief, hits, model=args.model, effort=args.effort, max_pages=args.pages)
+    except Exception as e:
+        fail("tailor", e)
     print(f"tailor: {t.attempts} attempt(s), tokens {t.usage['input_tokens']}/{t.usage['output_tokens']}, "
           f"{len(t.changes)} changes; uncovered: {', '.join(t.uncovered) or 'none'}")
-    usage = dict(t.usage)
+    usage.update(t.usage)
     cut_log: list = []
 
     def cut(current: Resume) -> Resume:
@@ -283,10 +354,16 @@ if __name__ == "__main__":
         expand_logs.append([c for c in r.changes if c.where != "none"])
         return r.resume
 
-    with Renderer() as renderer:
-        f = fit(t.resume, renderer, cutter=cut, expander=None if args.no_expand else expand,
-                max_pages=args.pages, out_path=out)
+    try:
+        with Renderer() as renderer:
+            f = fit(t.resume, renderer, cutter=cut, expander=None if args.no_expand else expand,
+                    max_pages=args.pages, out_path=out)
+    except Exception as e:
+        # The Tailor's answer was accepted; keep it beside the error.
+        fail("fit", e, tailored=t.resume, changes=t.changes)
 
+    for name in FAILURE_FILES:                                       # this run succeeded: clear an old failure
+        out.with_name(name).unlink(missing_ok=True)
     added = [c for log in expand_logs[:f.expanded] for c in log]     # kept expansions only
     out.with_suffix(".json").write_text(f.resume.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
     out.with_name("changes.json").write_text(

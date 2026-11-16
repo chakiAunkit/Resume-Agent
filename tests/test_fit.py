@@ -54,6 +54,35 @@ def resume() -> Resume:
     return Resume.model_validate(RESUME)
 
 
+def test_a_failed_run_is_recorded_in_the_output_folder(tmp_path, resume):
+    """A failed run used to leave an empty folder and no reason."""
+    import json
+
+    from src.agents.tailor import Change, TailorError
+    from src.tools.fit import FAILURE_FILES, record_failure
+
+    # Tailor stage: the rejected answer and the reasons are kept.
+    rejected = TailorError(["these figures ... must be removed: ['$50M']"], last_output='{"resume": "..."}',
+                           usage={"input_tokens": 200, "output_tokens": 90})
+    path = record_failure(tmp_path / "a", "tailor", rejected, {"input_tokens": 200, "output_tokens": 90})
+    error = json.loads(path.read_text(encoding="utf-8"))
+    assert path.name == "error.json" and error["stage"] == "tailor" and error["error"] == "TailorError"
+    assert error["problems"] == ["these figures ... must be removed: ['$50M']"]
+    assert error["tokens"] == {"input_tokens": 200, "output_tokens": 90} and error["failed_at"]
+    assert (tmp_path / "a" / "rejected_output.txt").read_text(encoding="utf-8") == '{"resume": "..."}'
+    assert not (tmp_path / "a" / "resume.unfitted.json").exists()          # nothing was accepted yet
+
+    # Fit stage: the Tailor's accepted resume is kept, and still loads.
+    changes = [Change(where="summary", atom_id=None, why="x")]
+    path = record_failure(tmp_path / "b", "fit", FitError("still 2 pages after 3 steps"), {"input_tokens": 1},
+                          tailored=resume, changes=changes)
+    error = json.loads(path.read_text(encoding="utf-8"))
+    assert error["stage"] == "fit" and error["problems"] == [] and "still 2 pages" in error["message"]
+    assert Resume.load(tmp_path / "b" / "resume.unfitted.json") == resume
+    assert json.loads((tmp_path / "b" / "changes.unfitted.json").read_text(encoding="utf-8"))[0]["where"] == "summary"
+    assert {p.name for p in (tmp_path / "b").iterdir()} <= set(FAILURE_FILES)
+
+
 def test_estimate_uses_square_law():
     # 1.10 pages of content -> scale ~ 1/sqrt(1.1) * margin
     assert estimate_scale(1.0, 1.10, 1) == pytest.approx(1 / math.sqrt(1.10) * 0.985, abs=1e-3)

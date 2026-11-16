@@ -519,6 +519,19 @@ def test_load_labels_accepts_skip():
     assert load_labels(path)[1] == {"a": "skip", "b": "yes"}
 
 
+def test_eval_date_is_the_fetch_day_not_today():
+    """The eval's level gate must not drift: experience is counted to the
+    day the labelled pool was fetched, whenever the eval is run."""
+    from src.tools.rank_eval import eval_date
+    assert eval_date({"fetched": "2026-09-27"}) == date(2026, 9, 27)
+    assert eval_date({"fetched": date(2026, 9, 27)}) == date(2026, 9, 27)      # unquoted in YAML
+    assert eval_date({"fetched": "2026-09-27"}, "2027-01-15") == date(2027, 1, 15)   # --as-of wins
+    assert eval_date({}) == date.today()                                        # nothing recorded
+    # the drift it removes: the same resume crosses a gate boundary with time
+    assert experience_years(RESUME, eval_date({"fetched": "2026-09-01"})) < \
+           experience_years(RESUME, eval_date({"fetched": "2027-03-01"}))
+
+
 def test_compare_table_has_one_row_per_setup():
     from src.tools.rank_eval import compare_table
     rows = [("minilm", "no titles", ["c", "f", "a", "d", "g"]), ("qwen3-0.6b", "titles", ["a", "d", "g", "e", "c"])]
@@ -546,6 +559,29 @@ def test_compare_table_has_one_row_per_setup():
 ])
 def test_years_asked_reads_the_largest_lower_bound(text, expected):
     assert years_asked(_post("y", "Data Scientist", text)) == expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("0-2 years of experience", 0),                            # was 2: zero could not start a range
+    ("Requires five years of experience.", 5),                 # was None: numbers in words
+    ("Three to five years of relevant experience", 3),
+    ("Minimum of five (5) years of experience", 5),
+    ("Experience: 5 plus years", 5),
+    ("A decade of experience in applied ML", 10),
+    ("2.5 years of experience", 2),                            # was 5: the match started at the fraction
+    ("Minimum 3 years, ideally 7+ years of experience", 3),    # was 7: a preference is not the minimum
+    ("3+ years of experience required; 6+ years preferred", 3),
+    ("Preferred: 8+ years in a senior role. Minimum 4 years of experience.", 4),
+    ("5+ years of experience preferred", 5),                   # a preference is the answer when it is all there is
+    ("One of our teams shipped it over five days.", None),     # a number word with no years after it
+])
+def test_years_asked_reads_words_zero_decimals_and_preferences(text, expected):
+    assert years_asked(_post("y", "Data Scientist", text)) == expected
+
+
+def test_posting_card_surfaces_years_written_in_words():
+    from src.agents.ranker import states_years
+    assert states_years("At least five years of experience.") and not states_years("One of five teams.")
 
 
 def test_years_asked_reads_the_title_too():

@@ -33,6 +33,10 @@ gate demoted, next to your label for each.
 Postings come from `data/jobs_cache/` only. This tool never calls JSearch:
 a page missing from the cache is an error, not a spent credit.
 
+The candidate's experience is counted up to the day the pool was fetched
+(`query.fetched` in the labels file; `--as-of` overrides), not to today, so
+the level gate gives the same result whenever the eval is run. See eval_date().
+
     python -m src.tools.rank_eval <labels>                         # stage 1 + 3 stage-2 runs
     python -m src.tools.rank_eval <labels> --stage1-only
     python -m src.tools.rank_eval <labels> --compare minilm,bge-base,qwen3-0.6b
@@ -42,6 +46,7 @@ a page missing from the cache is an error, not a spent credit.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +78,23 @@ def load_labels(path: Path | str) -> tuple[dict[str, Any], dict[str, str]]:
     if missing:
         raise ValueError(f"{len(missing)} posting(s) have no yes/maybe/no/skip label: " + "; ".join(missing))
     return doc.get("query", {}), labels
+
+
+def eval_date(query: dict[str, Any], override: str | None = None) -> date:
+    """The day the candidate's experience is counted up to: `override` (the
+    --as-of flag), else `query.fetched` in the labels file, else today.
+
+    The level gate compares each posting's years with the candidate's
+    experience, and "Present" on the resume means today. Left at today, the
+    same labels and the same cached postings score differently every month:
+    the threshold creeps up until a posting the gate demoted when the labels
+    were made is no longer demoted. The labels judge the pool as it stood on
+    the day it was fetched, so that is the day the eval counts to.
+    """
+    value = override or query.get("fetched")
+    if isinstance(value, date):          # YAML reads an unquoted 2026-09-27 as a date
+        return value
+    return date.fromisoformat(str(value)) if value else date.today()
 
 
 def judged(refs: list[str], labels: dict[str, str]) -> list[str]:
@@ -217,10 +239,14 @@ if __name__ == "__main__":
                     help="comma-separated embedders: compare stage-1 variants on each, no API calls")
     ap.add_argument("--profile", default=ROOT / "data" / "profile.yaml")
     ap.add_argument("--resume", default=ROOT / "assets" / "resume.json")
+    ap.add_argument("--as-of", default=None, metavar="YYYY-MM-DD",
+                    help="count the candidate's experience up to this day (default: query.fetched in the "
+                         "labels file, else today), so the level gate scores the same on every run")
     args = ap.parse_args()
     exclude = ranker_exclude_atoms(args.exclude_atoms)
 
     query, labels = load_labels(args.labels)
+    as_of = eval_date(query, args.as_of)
     posts = cached_posts(query, args.pages or int(query.get("pages", 3)))
     refs = {p.slug[-8:] for p in posts}
     unlabelled = sorted(refs - set(labels))
@@ -236,7 +262,9 @@ if __name__ == "__main__":
     print(f"P@{args.k} best possible: strict {best_possible(labels, args.k):.2f}, lenient "
           f"{best_possible(labels, args.k, ('yes', 'maybe')):.2f}. Random pick: strict "
           f"{random_expected(labels):.2f}, lenient {random_expected(labels, ('yes', 'maybe')):.2f}, "
-          f"recall@{CUT} {min(CUT / len(posts), 1):.2f}.\n")
+          f"recall@{CUT} {min(CUT / len(posts), 1):.2f}.")
+    print(f"Experience counted as of {as_of}: {experience_years(resume, as_of):.1f} years "
+          f"(today it would be {experience_years(resume):.1f}).\n")
 
     if args.compare:
         # The variants, each adding one change to a row above it, so every
@@ -251,15 +279,16 @@ if __name__ == "__main__":
         variants.append(Stage1Options(titles=True, level_slack=gate))
         if exclude:
             variants.append(Stage1Options(titles=True, exclude=exclude, level_slack=gate))
-        print(f"level gate rows: you have {experience_years(resume):.1f} years; postings asking more than "
-              f"{experience_years(resume) + gate:.1f} are demoted.\n")
+        print(f"level gate rows: you have {experience_years(resume, as_of):.1f} years; postings asking more "
+              f"than {experience_years(resume, as_of) + gate:.1f} are demoted.\n")
         rows = []
         for spec in (s.strip() for s in args.compare.split(",") if s.strip()):
             start = time.perf_counter()
             try:
                 embedder = CachedEmbedder(make_embedder(spec))
                 for options in variants:
-                    result = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0)
+                    result = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0,
+                                  today=as_of)
                     rows.append((spec, options.label, [r.ref for r in result.ranked]))
             except Exception as e:                 # one unavailable model must not lose the others
                 print(f"{spec}: skipped — {type(e).__name__}: {str(e)[:160]}")
@@ -272,7 +301,7 @@ if __name__ == "__main__":
     options = Stage1Options(titles=not args.no_titles, center=args.center, exclude=exclude,
                             level_slack=None if args.no_gate else args.gate_slack)
     embedder = CachedEmbedder(make_embedder(args.embed))    # one load; stage 1 repeats every run
-    stage1 = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0)
+    stage1 = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0, today=as_of)
     print("\n".join(report_stage(f"stage 1 ({args.embed}; {options.label})",
                                  [[r.ref for r in stage1.ranked]], labels, titles, args.k,
                                  stage1=True)) + "\n")
@@ -284,7 +313,8 @@ if __name__ == "__main__":
         rankings, tokens = [], [0, 0]
         for run in range(1, args.runs + 1):
             print(f"stage 2: run {run}/{args.runs} ...", flush=True)
-            result = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=RERANK_TOP)
+            result = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=RERANK_TOP,
+                          today=as_of)
             rankings.append([r.ref for r in result.ranked])
             tokens[0] += result.usage["prompt_tokens"]
             tokens[1] += result.usage["completion_tokens"]

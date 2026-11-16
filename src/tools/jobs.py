@@ -123,6 +123,15 @@ class MissingApiKey(ProviderError):
     pass
 
 
+class StaleCacheWarning(UserWarning):
+    """Postings were served from a cache older than the caller allows."""
+
+
+# What the CLIs pass as `stale_after_days`. Postings are searched with
+# date_posted="month", so a pool older than a week already holds closed jobs.
+STALE_AFTER_DAYS = 7
+
+
 # ---------------------------------------------------------------------------
 # JSearch (RapidAPI)
 # ---------------------------------------------------------------------------
@@ -284,10 +293,18 @@ def cache_path(cache_dir: Path, provider: str, query: JobQuery) -> Path:
     return cache_dir / provider / f"{slug}-n{query.num_pages}-{query.cache_key(provider)[:8]}.json"
 
 
-def _cached_raw(provider: Provider, query: JobQuery, cache_dir: Path, refresh: bool) -> dict[str, Any]:
+def _cached_raw(provider: Provider, query: JobQuery, cache_dir: Path,
+                refresh: bool) -> tuple[dict[str, Any], datetime | None]:
+    """-> (raw response, when it was fetched). The time is None for a
+    response fetched just now, and for a cache entry that records none."""
     path = cache_path(cache_dir, provider.name, query)
     if path.exists() and not refresh:
-        return json.loads(path.read_text(encoding="utf-8"))["raw"]
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            fetched_at = datetime.fromisoformat(entry["fetched_at"])
+        except (KeyError, TypeError, ValueError):
+            fetched_at = None
+        return entry["raw"], fetched_at
     raw = provider.fetch_raw(query)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
@@ -296,7 +313,7 @@ def _cached_raw(provider: Provider, query: JobQuery, cache_dir: Path, refresh: b
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "raw": raw,
     }, indent=1, ensure_ascii=False), encoding="utf-8")
-    return raw
+    return raw, None
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +330,7 @@ def fetch_jobs(
     date_posted: DatePosted = "month",
     cache_dir: Path | str = DEFAULT_CACHE_DIR,
     refresh: bool = False,
+    stale_after_days: float | None = None,
 ) -> list[JobPost]:
     """keyword (+ location) -> de-duplicated JobPosts from up to `pages` pages.
 
@@ -329,6 +347,15 @@ def fetch_jobs(
     retries) stops paging with a warning and returns what was fetched: those
     pages are cached, so running again *without* `refresh` resumes at the
     failed page and costs only the pages still missing.
+
+    The cache has no expiry: a cached page is served however old it is,
+    which is what the evals need (they score a fixed, labelled pool). A
+    caller that wants live postings passes `stale_after_days`; if any page
+    served from the cache is older than that, a StaleCacheWarning says how
+    old the pool is. It warns and never re-fetches: a re-fetch spends
+    requests and overwrites the cached pool, so that stays the caller's
+    decision (`refresh=True`).
+
     `provider` defaults to JSearch, which needs RAPIDAPI_KEY; inject a fake
     in tests.
     """
@@ -339,11 +366,14 @@ def fetch_jobs(
     posts: list[JobPost] = []
     seen: set[str] = set()
     cursor: str | None = None
+    oldest: datetime | None = None      # the oldest page served from the cache
     for page in range(1, pages + 1):
         query = JobQuery(keyword=keyword, location=location, country=country,
                          num_pages=1, cursor=cursor, date_posted=date_posted)
         try:
-            raw = _cached_raw(provider, query, Path(cache_dir), refresh)
+            raw, fetched_at = _cached_raw(provider, query, Path(cache_dir), refresh)
+            if fetched_at is not None and (oldest is None or fetched_at < oldest):
+                oldest = fetched_at
         except ProviderError as e:
             if page == 1:
                 raise
@@ -363,6 +393,17 @@ def fetch_jobs(
         cursor = provider.next_cursor(raw)
         if not cursor or not page_posts:
             break
+
+    if stale_after_days is not None and oldest is not None:
+        if oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - oldest).total_seconds() / 86400
+        if age_days > stale_after_days:
+            warnings.warn(StaleCacheWarning(
+                f"these postings come from the cache, fetched {oldest:%Y-%m-%d} ({age_days:.0f} days "
+                "ago); some will have closed. --refresh fetches current ones: one JSearch request per "
+                "page, and it overwrites this cached pool, including one a labels file was made for."),
+                stacklevel=2)
     return posts
 
 
@@ -397,6 +438,8 @@ if __name__ == "__main__":
                     help="up to N pages of 10, one request and one credit each; stops early when results run out")
     ap.add_argument("--date-posted", default="month", choices=["all", "today", "3days", "week", "month"])
     ap.add_argument("--refresh", action="store_true", help="ignore the cache and re-fetch")
+    ap.add_argument("--stale-after", type=float, default=STALE_AFTER_DAYS, metavar="DAYS",
+                    help=f"warn when cached postings are older than this (default {STALE_AFTER_DAYS})")
     ap.add_argument("--dump", action="store_true", help="write each JD to data/jobs_cache/jd/<slug>.txt")
     ap.add_argument("--show", default=None, help="print one JD in full: a row number from the table, or a job id")
     args = ap.parse_args()
@@ -404,7 +447,8 @@ if __name__ == "__main__":
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         posts = fetch_jobs(args.keyword, args.location, pages=args.pages, country=args.country,
-                           date_posted=args.date_posted, refresh=args.refresh)
+                           date_posted=args.date_posted, refresh=args.refresh,
+                           stale_after_days=args.stale_after)
     for w in caught:
         print(f"warning: {w.message}")
     print(f"{len(posts)} posting(s) for {args.keyword!r}"

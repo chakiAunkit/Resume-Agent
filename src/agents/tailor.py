@@ -43,7 +43,7 @@ from src.models import NonEmptyStr, Resume, StrictModel
 from src.tools.evidence import BriefHit, tokenize
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MODEL = os.environ.get("TAILOR_MODEL", "claude-sonnet-5")
+DEFAULT_MODEL = "claude-sonnet-5"
 # Claude 5 models think adaptively by default, and thinking tokens count
 # against max_tokens. The JSON answer needs ~5k tokens; the rest is
 # headroom so a long think never truncates the answer (that failure mode
@@ -51,8 +51,20 @@ DEFAULT_MODEL = os.environ.get("TAILOR_MODEL", "claude-sonnet-5")
 MAX_TOKENS = 32000
 # Adaptive-thinking effort. "high" is the API default and was overkill
 # for a rewrite; "medium" keeps reasoning on at a fraction of the tokens.
-DEFAULT_EFFORT = os.environ.get("TAILOR_EFFORT", "medium")
+DEFAULT_EFFORT = "medium"
 MAX_ATTEMPTS = 2   # roadmap: retry once
+
+
+def default_model() -> str:
+    """TAILOR_MODEL if set, else DEFAULT_MODEL. Read when called, not at
+    import: the CLIs import this module before they call load_dotenv(), so
+    a value read at import time never saw .env."""
+    return os.environ.get("TAILOR_MODEL") or DEFAULT_MODEL
+
+
+def default_effort() -> str:
+    """TAILOR_EFFORT if set, else DEFAULT_EFFORT. Read when called, as above."""
+    return os.environ.get("TAILOR_EFFORT") or DEFAULT_EFFORT
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +110,14 @@ rewrite that adds a fact, cites the atom's `id` in the change log. Rephrasing \
 existing content without adding facts cites null.
 3. Placement follows the atom. section "experience": a bullet under the \
 experience entry whose `company` equals the atom's `source`. "project": a \
-project entry. "publication": a publication entry. Never move content between \
-sections. Education atoms are never inserted.
-4. Leave `contact` and `education` exactly as given.
+project entry whose `name` is the atom's `source` and whose `year` is the \
+atom's. "publication": a publication entry with the atom's title, venue, \
+citation count and paper link. Never move content between sections. Education \
+atoms are never inserted.
+4. Leave `contact` and `education` exactly as given. In `experience`, return \
+every entry with its company, title, location, start and end exactly as given, \
+in the same order; only `bullets` change. A project or publication already on \
+the resume keeps its name and year, or its title, venue, citations and url.
 5. The brief lists must-haves with no supporting evidence. Do not add any \
 claim about them: no new bullet, sentence, or skill item. Existing resume \
 content is left as it is.
@@ -233,12 +250,85 @@ def _feedback(problems: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 # Figures as they appear in prose: $8M, 25,000, 20%, 90M, 2.5, 150. A trailing
-# "+" is stripped so "$8M+" and "$8M" are the same figure.
-_NUM = re.compile(r"\$?\d[\d,]*(?:\.\d+)?[MKkBx%]*")
+# "+" is stripped so "$8M+" and "$8M" are the same figure. A comma belongs to
+# the figure only between digits ("25,000", "1,00,000"): "in 2024, we" is the
+# figure 2024 followed by punctuation, not a different figure "2024,".
+_NUM = re.compile(r"\$?\d+(?:,\d+)*(?:\.\d+)?[MKkBx%]*")
 
 
 def _numbers(text: str) -> set[str]:
     return {m.rstrip("+") for m in _NUM.findall(text)}
+
+
+def _entry_facts(entry: Any) -> tuple[str, ...]:
+    """Everything about an experience entry except its bullets."""
+    return (entry.company, entry.title, entry.location, entry.start, entry.end)
+
+
+def _urls(resume: Resume) -> set[str]:
+    return ({link.url for link in resume.contact.links}
+            | {link.url for p in resume.projects for link in p.links}
+            | {p.url for p in resume.publications})
+
+
+def _check_projects(out: Resume, original: Resume, offered: dict[str, Atom]) -> list[str]:
+    """A project is one already on the resume, or an offered project atom
+    (named after the atom's `source`; its `title` is accepted too). Either
+    way the year is the known one."""
+    known = {_normalise(p.name): p.year for p in original.projects}
+    atoms: dict[str, Atom] = {}
+    for a in offered.values():
+        if a.section == "project":
+            atoms.setdefault(_normalise(a.source), a)
+            atoms.setdefault(_normalise(a.title), a)
+    problems = []
+    for p in out.projects:
+        key = _normalise(p.name)
+        if key in known:
+            year = known[key]
+        elif key in atoms:
+            year = atoms[key].year
+        else:
+            problems.append(
+                f"project {p.name!r} is neither on the current resume nor an offered "
+                "project atom; name a project after its atom's `source`, or remove it")
+            continue
+        if year is not None and p.year != year:
+            problems.append(f"project {p.name!r}: year must be {year!r}, not {p.year!r}")
+    return problems
+
+
+def _check_publications(out: Resume, original: Resume, offered: dict[str, Atom]) -> list[str]:
+    """A publication already on the resume keeps every field but `summary`.
+    A new one must be an offered publication atom, with that atom's venue,
+    citation count and paper link (the same mapping tests/test_consistency.py
+    holds the base resume to)."""
+    known = {_normalise(p.title): p for p in original.publications}
+    atoms = {_normalise(a.title): a for a in offered.values() if a.section == "publication"}
+    problems = []
+    for p in out.publications:
+        key = _normalise(p.title)
+        if key in known:
+            o = known[key]
+            if (p.venue, p.citations, p.url) != (o.venue, o.citations, o.url):
+                problems.append(
+                    f"publication {p.title!r}: venue, citations and url must be returned "
+                    "exactly as given; only `summary` may change")
+        elif key in atoms:
+            a = atoms[key]
+            venue, source = _normalise(p.venue), _normalise(a.source)
+            if not venue or not (venue in source or source in venue):
+                problems.append(f"publication {p.title!r}: venue must be the atom's `source`, {a.source!r}")
+            if not any(_normalise(m) == _normalise(f"{p.citations} citations") for m in a.metrics):
+                problems.append(f"publication {p.title!r}: citations={p.citations} is not in atom "
+                                f"{a.id!r}'s metrics")
+            if p.url != a.links.paper:
+                problems.append(f"publication {p.title!r}: url must be atom {a.id!r}'s paper link")
+        else:
+            problems.append(
+                f"publication {p.title!r} is neither on the current resume nor an offered "
+                "publication atom; remove it")
+    return problems
 
 
 def verify(out: TailoredResume, original: Resume, hits: list[BriefHit]) -> list[str]:
@@ -272,6 +362,23 @@ def verify(out: TailoredResume, original: Resume, hits: list[BriefHit]) -> list[
     if out.resume.education != original.education:
         problems.append("`education` must be returned unchanged")
 
+    # Employment history is fact, not phrasing. A changed title or date
+    # carries no new figure and cites no atom, so nothing below would see it.
+    if [_entry_facts(e) for e in out.resume.experience] != [_entry_facts(e) for e in original.experience]:
+        problems.append(
+            "`experience` entries must be returned with company, title, location, start and "
+            "end exactly as given, none added, removed or reordered; only `bullets` may change")
+    problems += _check_projects(out.resume, original, offered)
+    problems += _check_publications(out.resume, original, offered)
+
+    allowed_urls = _urls(original) | {u for a in offered.values() for u in a.links.model_dump().values() if u}
+    unknown_urls = _urls(out.resume) - allowed_urls
+    if unknown_urls:
+        problems.append(
+            "these URLs appear in neither the current resume nor any offered atom's "
+            f"links and must be removed: {sorted(unknown_urls)}"
+        )
+
     allowed = _numbers(original.model_dump_json())
     for atom in offered.values():
         allowed |= _numbers(atom.model_dump_json())
@@ -285,12 +392,16 @@ def verify(out: TailoredResume, original: Resume, hits: list[BriefHit]) -> list[
     # New skill items must have a basis somewhere in the inputs. Compared
     # as normalised token strings (same tokenizer as retrieval), so
     # "Knowledge Graphs" is grounded by an atom that says "knowledge graph".
-    corpus = _normalise(original.model_dump_json() + " " + " ".join(a.model_dump_json() for a in offered.values()))
+    # Whole tokens, not substrings: both sides are space-joined tokens and
+    # are padded with a space, so "R" needs the token "r" somewhere in the
+    # inputs; the r in "retrieval" does not ground it.
+    corpus = " " + _normalise(original.model_dump_json() + " "
+                              + " ".join(a.model_dump_json() for a in offered.values())) + " "
     existing = {_normalise(i) for g in original.skills for i in g.items}
     for group in out.resume.skills:
         for item in group.items:
             norm = _normalise(item)
-            if norm and norm not in existing and norm not in corpus:
+            if norm and norm not in existing and f" {norm} " not in corpus:
                 problems.append(
                     f"skill item {item!r} in {group.category!r} has no basis in the "
                     "current resume or any offered atom; remove it"
@@ -307,11 +418,17 @@ def _normalise(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 class TailorError(RuntimeError):
-    """Both attempts failed. `.problems` holds the last rejection reasons."""
+    """Both attempts failed. `.problems` holds the last rejection reasons;
+    `.last_output` the text the model returned last (None if it returned
+    none), so a caller can save what was rejected; `.usage` the tokens the
+    failed attempts spent."""
 
-    def __init__(self, problems: list[str]) -> None:
+    def __init__(self, problems: list[str], *, last_output: str | None = None,
+                 usage: dict[str, int] | None = None) -> None:
         super().__init__("Tailor output rejected after retry:\n" + "\n".join(f"- {p}" for p in problems))
         self.problems = problems
+        self.last_output = last_output
+        self.usage = usage or {"input_tokens": 0, "output_tokens": 0}
 
 
 @dataclass(frozen=True)
@@ -381,11 +498,12 @@ def _run(
                 f"response contained no text block "
                 f"(stop_reason={response.stop_reason!r}, "
                 f"blocks={[getattr(b, 'type', '?') for b in response.content]})"
-            ])
+            ], usage=usage)
         if response.stop_reason == "max_tokens":
             problems = ["output was cut off at the token limit; return a shorter resume"]
         elif response.stop_reason == "refusal":
-            raise TailorError([f"model refused (stop_reason='refusal'): {text[:300]}"])
+            raise TailorError([f"model refused (stop_reason='refusal'): {text[:300]}"],
+                              last_output=text, usage=usage)
         else:
             try:
                 out = TailoredResume.model_validate_json(text)
@@ -409,7 +527,7 @@ def _run(
             {"role": "user", "content": _feedback(problems)},
         ]
 
-    raise TailorError(problems)
+    raise TailorError(problems, last_output=text, usage=usage)
 
 
 def tailor(
@@ -418,19 +536,21 @@ def tailor(
     hits: list[BriefHit],
     *,
     client: Any = None,
-    model: str = DEFAULT_MODEL,
-    effort: str = DEFAULT_EFFORT,
+    model: str | None = None,
+    effort: str | None = None,
     max_pages: int = 1,
 ) -> TailorResult:
     """resume + brief + evidence -> validated, grounded TailorResult.
 
     `client` is injectable so tests run the whole validate/verify/retry
-    path against a stub without spending credits.
+    path against a stub without spending credits. `model` and `effort`
+    default to TAILOR_MODEL / TAILOR_EFFORT (default_model(), default_effort()).
     """
     return _run(
         messages=[{"role": "user", "content": build_prompt(resume, brief, hits)}],
         original=resume, brief=brief, hits=hits,
-        client=client, model=model, effort=effort, max_pages=max_pages,
+        client=client, model=model or default_model(), effort=effort or default_effort(),
+        max_pages=max_pages,
     )
 
 
@@ -441,8 +561,8 @@ def revise(
     instruction: str,
     *,
     client: Any = None,
-    model: str = DEFAULT_MODEL,
-    effort: str = DEFAULT_EFFORT,
+    model: str | None = None,
+    effort: str | None = None,
     max_pages: int = 1,
 ) -> TailorResult:
     """A follow-up edit to an already-tailored resume, under the same rules.
@@ -456,7 +576,8 @@ def revise(
     return _run(
         messages=[{"role": "user", "content": prompt}],
         original=resume, brief=brief, hits=hits,
-        client=client, model=model, effort=effort, max_pages=max_pages,
+        client=client, model=model or default_model(), effort=effort or default_effort(),
+        max_pages=max_pages,
     )
 
 
@@ -480,11 +601,14 @@ if __name__ == "__main__":
     ap.add_argument("--resume", default=ROOT / "assets" / "resume.json")
     ap.add_argument("--profile", default=ROOT / "data" / "profile.yaml")
     ap.add_argument("--out", default=ROOT / "output" / "tailored" / "resume.json")
-    ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--effort", default=DEFAULT_EFFORT, help="adaptive-thinking effort: low|medium|high")
+    ap.add_argument("--model", default=None, help=f"default: TAILOR_MODEL, else {DEFAULT_MODEL}")
+    ap.add_argument("--effort", default=None,
+                    help=f"adaptive-thinking effort: low|medium|high (default: TAILOR_EFFORT, else {DEFAULT_EFFORT})")
     ap.add_argument("--pages", type=int, default=1, help="page budget stated to the model")
     ap.add_argument("--render", action="store_true", help="also render the PDF and report pages")
     args = ap.parse_args()
+    # Resolved here, after load_dotenv(), so .env counts and the lines below print what is used.
+    args.model, args.effort = args.model or default_model(), args.effort or default_effort()
 
     brief = JobBrief.load(args.brief)
     resume = Resume.load(args.resume)

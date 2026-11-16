@@ -92,6 +92,38 @@ def test_first_call_fetches_and_caches_raw(tmp_path):
     assert "fetched_at" in entry
 
 
+def _age_cache(cache_dir, days: float) -> None:
+    """Rewrite every cache entry's fetched_at to `days` ago."""
+    from datetime import datetime, timedelta, timezone
+    for path in cache_dir.rglob("*.json"):
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        entry["fetched_at"] = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+        path.write_text(json.dumps(entry), encoding="utf-8")
+
+
+def test_old_cache_warns_with_its_age_and_never_refetches(tmp_path):
+    """The cache has no expiry; a caller that wants live postings is told
+    how old the pool is. It is not re-fetched: that costs requests and
+    overwrites the pool."""
+    import warnings
+
+    from src.tools.jobs import StaleCacheWarning
+    prov = FakeProvider(_raw(_item("a"), cursor=None))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                       # a fresh fetch never warns
+        fetch_jobs("q", provider=prov, cache_dir=tmp_path, stale_after_days=7)
+    _age_cache(tmp_path, days=50)
+    with pytest.warns(StaleCacheWarning, match=r"\(50 days ago\)"):
+        posts = fetch_jobs("q", provider=prov, cache_dir=tmp_path, stale_after_days=7)
+    assert [p.id for p in posts] == ["jsearch:a"] and len(prov.fetches) == 1     # served, not re-fetched
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        fetch_jobs("q", provider=prov, cache_dir=tmp_path)                        # the evals: no limit, no warning
+        fetch_jobs("q", provider=prov, cache_dir=tmp_path, stale_after_days=60)   # within the limit
+        fetch_jobs("q", provider=prov, cache_dir=tmp_path, stale_after_days=7, refresh=True)   # fetched just now
+    assert len(prov.fetches) == 2
+
+
 def test_second_call_is_served_from_cache(tmp_path):
     prov = FakeProvider(_raw(_item("a")))
     fetch_jobs("data scientist", provider=prov, cache_dir=tmp_path)

@@ -177,7 +177,9 @@ def test_verify_skill_check_is_normalised(resume, hits):
     r = json.loads(_good_output())
     r["resume"]["skills"][0]["items"] += ["Vector Databases", "ROOT-CAUSE ANALYSIS"]
     # atom keywords say "vector database"; atom skills say "Root-cause analysis".
-    # (Irregular plurals — "analyses" — are outside the singulariser's remit.)
+    assert verify(TailoredResume.model_validate(r), resume, hits) == []
+    # "analyses" reduces to the same token as "analysis" (evidence._singular)
+    r["resume"]["skills"][0]["items"] += ["Root-cause analyses"]
     assert verify(TailoredResume.model_validate(r), resume, hits) == []
 
 
@@ -190,6 +192,145 @@ def test_verify_skill_check_follows_the_tokenizer(resume, hits):
     assert verify(TailoredResume.model_validate(r), resume, hits) == []
 
 
+def test_verify_skill_check_matches_whole_tokens(resume, hits):
+    """A short skill is not grounded by letters inside other words: every
+    input contains an "r", a "c" and a "go" somewhere ("Bangalore", "cost",
+    "category"). The inputs must contain the token itself."""
+    r = json.loads(_good_output())
+    r["resume"]["skills"][0]["items"] += ["R", "Go", "C", "Postgres", "pgvector"]
+    problems = verify(TailoredResume.model_validate(r), resume, hits)
+    # pgvector is a skill of the offered project atom; "Postgres" is only a
+    # prefix of its "PostgreSQL".
+    assert len(problems) == 4
+    for item in ("'R'", "'Go'", "'C'", "'Postgres'"):
+        assert any(f"skill item {item}" in p for p in problems)
+
+
+# ------------------------------------------------ verify: figures
+
+def test_numbers_do_not_swallow_a_trailing_comma():
+    from src.agents.tailor import _numbers
+    assert _numbers("In 2024, cut cost by 20%, across 25,000 stores; 1,00,000 rows, $8M+.") == {
+        "2024", "20%", "25,000", "1,00,000", "$8M"}
+
+
+def test_verify_accepts_an_allowed_figure_followed_by_a_comma(resume, hits):
+    """Before the fix "20%," and "12," read as the figures '20%' and '12,',
+    and the second was rejected as fabricated."""
+    r = json.loads(_good_output())
+    r["resume"]["experience"][0]["bullets"][0] = "Across 12, then 60M+, datasets, found a 20% mismatch, worth $8M."
+    assert verify(TailoredResume.model_validate(r), resume, hits) == []
+
+
+# ------------------------------- verify: facts that are not the Tailor's
+
+@pytest.mark.parametrize("field, value", [
+    ("title", "Principal Data Scientist"),
+    ("start", "09/2021"),            # "2021" is on the resume (education), so the figure check passes it
+    ("end", "Present"),
+    ("location", "London"),
+])
+def test_verify_catches_an_edited_experience_fact(resume, hits, field, value):
+    r = json.loads(_good_output())
+    r["resume"]["experience"][0][field] = value
+    problems = verify(TailoredResume.model_validate(r), resume, hits)
+    assert len(problems) == 1 and "`experience` entries" in problems[0]
+
+
+def test_verify_catches_added_removed_and_reordered_experience(hits):
+    two = json.loads(json.dumps(RESUME))
+    two["experience"].append({"company": "Keka HR", "title": "Engineer", "location": "Hyderabad",
+                              "start": "02/2021", "end": "08/2022", "bullets": []})
+    original = Resume.model_validate(two)
+    changes = [{"where": "summary", "atom_id": None, "why": "x"}]
+
+    def check(experience):
+        doc = {"resume": {**two, "experience": experience}, "changes": changes}
+        return verify(TailoredResume.model_validate(doc), original, hits)
+
+    assert check(two["experience"]) == []
+    assert any("`experience` entries" in p for p in check(two["experience"][:1]))        # a job dropped
+    assert any("`experience` entries" in p for p in check(two["experience"][::-1]))      # reordered
+    invented = {**two["experience"][1], "company": "Acme"}
+    assert any("`experience` entries" in p for p in check(two["experience"] + [invented]))
+
+
+def _with_project(**project) -> TailoredResume:
+    # The example atom states no year, so any year already on the resume passes.
+    r = json.loads(_good_output())
+    r["resume"]["projects"] = [{
+        "name": "Text2SQL Agent with Long-Term Memory", "year": "2022",
+        "links": [{"type": "github", "label": "GitHub",
+                   "url": "https://github.com/chakiAunkit/Text2SQL-Memory-Agent"}],
+        "description": "Built a fully local Text2SQL agent with long-term memory.", **project}]
+    r["changes"].append({"where": "projects[0]", "atom_id": "self-text2sql-memory-agent", "why": "SQL"})
+    return TailoredResume.model_validate(r)
+
+
+def test_verify_accepts_a_project_from_an_offered_atom(resume, hits):
+    assert verify(_with_project(), resume, hits) == []
+    # the atom's title is accepted as a name too
+    assert verify(_with_project(name="Local Text2SQL agent with long-term memory"), resume, hits) == []
+
+
+def test_verify_catches_an_invented_project(resume, hits):
+    """No figure and no atom id to trip the other checks."""
+    out = _with_project(name="Kubernetes Autoscaler", links=[],
+                        description="Built an autoscaler for LLM serving.")
+    problems = verify(out, resume, hits)
+    assert len(problems) == 1 and "Kubernetes Autoscaler" in problems[0]
+
+
+def test_verify_catches_an_invented_url(resume, hits):
+    out = _with_project(links=[{"type": "github", "label": "GitHub",
+                                "url": "https://github.com/someone-else/repo"}])
+    problems = verify(out, resume, hits)
+    assert len(problems) == 1 and "https://github.com/someone-else/repo" in problems[0]
+
+
+def test_verify_catches_a_changed_project_year(hits):
+    base = json.loads(json.dumps(RESUME))
+    base["projects"] = [{"name": "Attrition Model", "year": "2021", "links": [], "description": "A model."}]
+    out = json.loads(json.dumps(base))
+    out["projects"][0]["year"] = "2022"                       # "2022" is on the resume: the figure check passes it
+    doc = {"resume": out, "changes": [{"where": "summary", "atom_id": None, "why": "x"}]}
+    problems = verify(TailoredResume.model_validate(doc), Resume.model_validate(base), hits)
+    assert len(problems) == 1 and "year must be '2021'" in problems[0]
+
+
+def test_verify_holds_a_new_project_to_its_atoms_year(resume, hits):
+    atom = Profile.model_validate({"atoms": [{
+        "id": "self-attrition", "section": "project", "source": "Attrition Prediction Modelling",
+        "title": "Employee attrition prediction model", "summary": "Predicted attrition.", "year": "2021"}]}).atoms[0]
+
+    def check(year):
+        r = json.loads(json.dumps(RESUME))
+        r["projects"] = [{"name": "Attrition Prediction Modelling", "year": year, "links": [],
+                          "description": "Predicted attrition."}]
+        doc = {"resume": r, "changes": [{"where": "projects[0]", "atom_id": "self-attrition", "why": "x"}]}
+        return verify(TailoredResume.model_validate(doc), resume, hits + [BriefHit(atom, 1.0, (), ())])
+
+    assert check("2021") == []
+    assert check("2022") == ["project 'Attrition Prediction Modelling': year must be '2021', not '2022'"]
+
+
+def test_model_and_effort_come_from_the_environment_at_call_time(resume, hits, monkeypatch):
+    """They used to be read at import, before the CLIs' load_dotenv(), so a
+    TAILOR_MODEL in .env was ignored."""
+    monkeypatch.setenv("TAILOR_MODEL", "claude-opus-5")
+    monkeypatch.setenv("TAILOR_EFFORT", "high")
+    client = fake_client(_good_output(), _good_output(), _good_output())
+    tailor(resume, BRIEF, hits, client=client)
+    assert client.calls[0]["model"] == "claude-opus-5"
+    assert client.calls[0]["output_config"]["effort"] == "high"
+    tailor(resume, BRIEF, hits, client=client, model="claude-sonnet-5", effort="low")   # an argument wins
+    assert client.calls[1]["model"] == "claude-sonnet-5"
+    assert client.calls[1]["output_config"]["effort"] == "low"
+    monkeypatch.setenv("TAILOR_MODEL", "")                    # an empty value is not a model id
+    tailor(resume, BRIEF, hits, client=client)
+    assert client.calls[2]["model"] == "claude-sonnet-5"
+
+
 def test_system_prompt_carries_page_budget():
     assert "fit 1 A4 page(s)" in system_prompt(1)
     assert "fit 2 A4 page(s)" in system_prompt(2)
@@ -197,7 +338,9 @@ def test_system_prompt_carries_page_budget():
 
 # --------------------------------------------------------------- tailor
 
-def test_happy_path_one_attempt(resume, hits):
+def test_happy_path_one_attempt(resume, hits, monkeypatch):
+    monkeypatch.delenv("TAILOR_MODEL", raising=False)       # the defaults, whatever the shell has set
+    monkeypatch.delenv("TAILOR_EFFORT", raising=False)
     client = fake_client(_good_output())
     result = tailor(resume, BRIEF, hits, client=client)
     assert result.attempts == 1
@@ -237,6 +380,9 @@ def test_two_failures_raise(resume, hits):
         tailor(resume, BRIEF, hits, client=client)
     assert len(client.calls) == 2
     assert "nope-atom" in exc.value.problems[0]
+    # what a caller needs to record the failure: the rejected answer and its cost
+    assert exc.value.last_output == bad
+    assert exc.value.usage == {"input_tokens": 200, "output_tokens": 100}
 
 
 def test_empty_response_reports_stop_reason(resume, hits):
@@ -322,3 +468,39 @@ def test_expand_cannot_invent_a_figure_in_a_publication_summary(with_pub, hits):
     out = TailoredResume.model_validate_json(_with_summary(resume, "Reached 0.9991 pixel accuracy."))
     problems = verify(out, resume, hits + [pub_hit])
     assert any("0.9991" in p for p in problems)
+
+
+# --------------------------------------- verify: publication facts
+
+@pytest.mark.parametrize("field, value", [
+    ("venue", "Nature"),
+    ("citations", 3929),             # a figure the atom does state, about something else
+    ("url", "https://example.com/other"),
+])
+def test_verify_catches_an_edited_publication_fact(with_pub, hits, field, value):
+    resume, pub_hit = with_pub
+    r = resume.model_dump(mode="json")
+    r["publications"][0][field] = value
+    doc = {"resume": r, "changes": [{"where": "publications[0]", "atom_id": None, "why": "x"}]}
+    problems = verify(TailoredResume.model_validate(doc), resume, hits + [pub_hit])
+    assert any("venue, citations and url must be returned exactly as given" in p for p in problems)
+
+
+def test_verify_checks_a_new_publication_against_its_atom(resume, hits):
+    atom = Profile.model_validate({"atoms": [{
+        **PUB_ATOM, "metrics": PUB_ATOM["metrics"] + ["151 citations"],
+        "links": {"paper": "https://example.com/unet"}}]}).atoms[0]
+    offered = hits + [BriefHit(atom, 1.0, (), ())]
+
+    def check(**over):
+        r = json.loads(json.dumps(RESUME))
+        r["publications"] = [{"title": "Improved U-Net", "venue": "Journal of Imaging",
+                              "citations": 151, "url": "https://example.com/unet", **over}]
+        doc = {"resume": r, "changes": [{"where": "publications[0]", "atom_id": "pub-unet", "why": "x"}]}
+        return verify(TailoredResume.model_validate(doc), resume, offered)
+
+    assert check() == []
+    assert any("citations=3929" in p for p in check(citations=3929))
+    assert any("venue must be the atom's `source`" in p for p in check(venue="Nature"))
+    assert any("neither on the current resume nor an offered publication atom" in p
+               for p in check(title="A Paper Nobody Wrote"))

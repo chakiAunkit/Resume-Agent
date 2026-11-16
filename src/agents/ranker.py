@@ -397,17 +397,56 @@ def score_postings(posts: Sequence[JobPost], atoms: Sequence[Atom], embedder: Em
 # ---------------------------------------------------------------------------
 
 # "5+ years", "4-8 years", "6 to 8 yrs", "Exp : 6-8yrs", "12 + years", and
-# "7 11 Years" (a range whose dash the job board dropped). Numbers 1-20 only:
+# "7 11 Years" (a range whose dash the job board dropped). Numbers 0-20 only:
 # "we've done that for 90 years" is company history, not a requirement.
 # Two-digit numbers come first in the alternation so a capture of "12+" is
-# 12 — never 1 — whatever else the pattern could settle for.
-_NUM = r"(?:1\d|20|[1-9])"
-_YEARS = re.compile(rf"\b({_NUM})\s*(?:\+|(?:\s*(?:-|–|—|to)\s*|\s+)({_NUM}))?\s*\+?\s*(?:years?|yrs?)\b",
-                    re.I)
+# 12 — never 1 — whatever else the pattern could settle for. Zero counts so
+# that "0-2 years" reads as 0, its lower bound, not as a bare "2 years".
+# A decimal reads as its whole part ("2.5 years" is 2); the lookbehind stops
+# the match from starting at the fraction and reading 5.
+_NUM = r"(?:1\d|20|\d)"
+_YEARS = re.compile(rf"(?<!\d\.)\b({_NUM})(?:\.\d+)?\s*(?:\+|(?:\s*(?:-|–|—|to)\s*|\s+)({_NUM}))?"
+                    rf"\s*\+?\s*(?:years?|yrs?)\b", re.I)
 # A bare "N years" is a requirement only near a word that says so; "over the
 # last 5 years, Gartner ranked us #1" is not one. A "+" or a range always is.
 _ASKS = re.compile(r"\b(?:exp(?:erience[ds]?|\.)?|min(?:imum|\.)?|at\s*least|relevant|professional)\b", re.I)
 _ASKS_WINDOW = 60             # characters either side of the number, within its line
+
+# Numbers written as words. Rewritten to digits before _YEARS runs, and only
+# where a years phrase follows, so "one of our teams" is left alone:
+# "five years" -> "5 years", "three to five years" -> "3 to 5 years",
+# "five (5) years" -> "five 5 years", "5 plus years" -> "5+ years",
+# "a decade of experience" -> "10 years of experience".
+_WORD_NUMBERS = {word: n for n, word in enumerate(
+    "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen twenty".split(), 1)}
+_YEARS_AHEAD = r"(?:years?|yrs?)\b"
+_SPELLED = re.compile(rf"\b({'|'.join(_WORD_NUMBERS)})\b"
+                      rf"(?=\s*(?:\+|plus\b)?\s*(?:(?:-|–|—|to)\s*\w+\s*)?{_YEARS_AHEAD})", re.I)
+_PLUS_WORD = re.compile(rf"(?<=\d)\s*plus\b(?=\s*{_YEARS_AHEAD})", re.I)
+_BRACKETED = re.compile(rf"\((\d{{1,2}})\)(?=\s*\+?\s*{_YEARS_AHEAD})")
+_DECADE = re.compile(r"\b(?:a|one)\s+decade\b", re.I)
+
+# A years phrase marked as a preference is not the minimum: "Minimum 3
+# years, ideally 7+" asks for 3. The marker must sit in the same clause,
+# just before the number or just after the phrase.
+_PREFERRED = re.compile(r"\b(?:ideal(?:ly)?|prefer(?:red|ably|ence)?|nice[- ]to[- ]have|"
+                        r"desir(?:ed|able)|a plus|bonus)\b", re.I)
+_PREFERRED_WINDOW = 30        # characters before the number / after the phrase
+_CLAUSE_END = re.compile(r"[,;.]|\d")
+
+
+def _digits(line: str) -> str:
+    """The line with spelled-out years rewritten as digits (see _WORD_NUMBERS)."""
+    line = _DECADE.sub("10 years", line)
+    line = _SPELLED.sub(lambda m: str(_WORD_NUMBERS[m.group(1).lower()]), line)
+    line = _BRACKETED.sub(r"\1", line)
+    return _PLUS_WORD.sub("+", line)
+
+
+def states_years(text: str) -> bool:
+    """True if `text` contains a years phrase, in digits or in words."""
+    return _YEARS.search(_digits(text)) is not None
 
 
 def years_asked(post: JobPost) -> int | None:
@@ -418,12 +457,23 @@ def years_asked(post: JobPost) -> int | None:
     Largest, because a posting's secondary asks ("8+ years in data science
     with 2-3 in GenAI") are parts of its main one. Lower bound, because "6-8
     years" means six is enough. The title counts: "Data Scientist (Exp :
-    6-8yrs)" says it nowhere else. Alternatives ("6+ years with a Masters or
-    4+ with a PhD") read as the larger — a known over-read, and one reason
-    the gate demotes instead of dropping.
+    6-8yrs)" says it nowhere else.
+
+    Phrases marked as a preference ("ideally 7+ years", "5+ years
+    preferred") are kept apart: they are the answer only when the posting
+    states no plain requirement at all.
+
+    Known over-reads, and the reason the gate demotes instead of dropping:
+    alternatives read as the larger ("6+ years with a Masters or 4+ with a
+    PhD" -> 6), and a "+" phrase in company prose counts ("15+ years of
+    history"). A preference stated only by a heading on another line
+    ("Preferred qualifications") is not seen: lines are read one at a time.
     """
-    best: int | None = None
+    required: list[int] = []
+    preferred: list[int] = []
     for line in [post.title, *post.description.splitlines()]:
+        line = _digits(line)
+        previous_end = 0
         for m in _YEARS.finditer(line):
             low, high = int(m.group(1)), m.group(2)
             if high is not None:
@@ -431,8 +481,13 @@ def years_asked(post: JobPost) -> int | None:
             window = line[max(m.start() - _ASKS_WINDOW, 0):m.end() + _ASKS_WINDOW]
             if high is None and "+" not in m.group(0) and not _ASKS.search(window):
                 continue
-            best = low if best is None else max(best, low)
-    return best
+            # The clause this phrase sits in: back to the previous years
+            # phrase or sentence end, forward to the next comma, stop or number.
+            before = re.split(r"[.;]\s", line[max(previous_end, m.start() - _PREFERRED_WINDOW):m.start()])[-1]
+            after = _CLAUSE_END.split(line[m.end():m.end() + _PREFERRED_WINDOW], maxsplit=1)[0]
+            previous_end = m.end()
+            (preferred if _PREFERRED.search(before) or _PREFERRED.search(after) else required).append(low)
+    return max(required) if required else max(preferred, default=None)
 
 
 def _months(month_year: str) -> tuple[int, int]:
@@ -545,7 +600,7 @@ def posting_card(scored: Scored, n_sentences: int = SENTENCES_PER_POSTING) -> st
     lines = [f"[{scored.ref}] {post.title} — {post.company}{where}"]
     title = " ".join(post.title.split())
     body = [s for s in scored.sentences if s != title]       # the header already shows it
-    years = [s for s in body if _YEARS.search(s)][:2]
+    years = [s for s in body if states_years(s)][:2]
     if years:
         lines.append("Experience asked: " + " | ".join(years))
     lines += [f"- {s}" for s in body if s not in years][:n_sentences]
@@ -723,7 +778,7 @@ if __name__ == "__main__":
 
     from dotenv import load_dotenv
 
-    from src.tools.jobs import fetch_jobs
+    from src.tools.jobs import STALE_AFTER_DAYS, fetch_jobs
 
     load_dotenv()
 
@@ -749,6 +804,10 @@ if __name__ == "__main__":
     ap.add_argument("--profile", default=ROOT / "data" / "profile.yaml")
     ap.add_argument("--resume", default=ROOT / "assets" / "resume.json")
     ap.add_argument("--out", default=ROOT / "output" / "shortlist.json")
+    ap.add_argument("--refresh", action="store_true",
+                    help="re-fetch the postings instead of using data/jobs_cache (one request per page)")
+    ap.add_argument("--stale-after", type=float, default=STALE_AFTER_DAYS, metavar="DAYS",
+                    help=f"warn when cached postings are older than this (default {STALE_AFTER_DAYS})")
     args = ap.parse_args()
     # With no flags this is default_options(): the flags' defaults are its values.
     options = Stage1Options(titles=not args.no_titles, center=args.center,
@@ -757,7 +816,8 @@ if __name__ == "__main__":
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        posts = fetch_jobs(args.keyword, args.location, pages=args.pages)
+        posts = fetch_jobs(args.keyword, args.location, pages=args.pages, refresh=args.refresh,
+                           stale_after_days=args.stale_after)
     for w in caught:
         print(f"warning: {w.message}")
     if not posts:

@@ -126,6 +126,7 @@
   <div class="rsection-body">
     {% for pub in publications %}
     <p class="pub"><strong>{{ pub.title }}</strong> (<a href="{{ pub.url }}">{{ pub.venue }}</a>, <strong>Citations: {{ pub.citations }}</strong>)</p>
+    {% if pub.summary %}<p class="flow pub-summary">{{ pub.summary }}</p>{% endif %}
     {% endfor %}
   </div>
 </section>

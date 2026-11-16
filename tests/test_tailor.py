@@ -15,6 +15,7 @@ import pytest
 
 from src.agents.tailor import (
     CUT_INSTRUCTION,
+    expand_instruction,
     TailorError,
     TailoredResume,
     build_prompt,
@@ -180,6 +181,15 @@ def test_verify_skill_check_is_normalised(resume, hits):
     assert verify(TailoredResume.model_validate(r), resume, hits) == []
 
 
+def test_verify_skill_check_follows_the_tokenizer(resume, hits):
+    """_normalise() is " ".join(tokenize(...)), so keyword v6 reaches the
+    Tailor too: a skill spelled the JD's way ("eCommerce") is grounded by an
+    atom tagged "e-commerce". Before v6 this was rejected as invented."""
+    r = json.loads(_good_output())
+    r["resume"]["skills"][0]["items"] += ["eCommerce"]
+    assert verify(TailoredResume.model_validate(r), resume, hits) == []
+
+
 def test_system_prompt_carries_page_budget():
     assert "fit 1 A4 page(s)" in system_prompt(1)
     assert "fit 2 A4 page(s)" in system_prompt(2)
@@ -258,3 +268,57 @@ def test_truncation_is_a_retryable_problem(resume, hits):
     with pytest.raises(TailorError, match="token limit"):
         tailor(resume, BRIEF, hits, client=client)
     assert len(client.calls) == 2  # truncation is retried, then given up on
+
+
+# ----------------------------------------------- expand step (Oct 2026)
+
+PUB_ATOM = {"id": "pub-unet", "section": "publication", "source": "Journal of Imaging",
+            "title": "Improved U-Net", "year": "2021",
+            "summary": "U-Net with a VGG-16 encoder reaching 0.9975 pixel accuracy on 3,929 MRI images.",
+            "metrics": ["0.9975 pixel accuracy", "3,929 images"]}
+
+
+@pytest.fixture
+def with_pub():
+    resume = json.loads(json.dumps(RESUME))
+    resume["publications"] = [{"title": "Improved U-Net", "venue": "Journal of Imaging",
+                               "citations": 151, "url": "https://example.com/unet"}]
+    atom = Profile.model_validate({"atoms": [PUB_ATOM]}).atoms[0]
+    return Resume.model_validate(resume), BriefHit(atom, 0.0, (), ())
+
+
+def _with_summary(base: Resume, summary: str) -> str:
+    r = base.model_dump(mode="json")
+    r["publications"][0]["summary"] = summary
+    return json.dumps({"resume": r, "changes": [
+        {"where": "publications[0].summary", "atom_id": "pub-unet", "why": "fills leftover room"}]})
+
+
+def test_expand_instruction_states_the_room_and_the_limits():
+    text = expand_instruction(0.10, 6)
+    assert "about 10%" in text and "roughly 6 lines" in text
+    assert "at most 5 lines (about 500 characters)" in text           # one line of slack
+    assert "Do not remove, shorten, reorder or rewrite" in text and '"none"' in text
+    assert "publication" in text and "experience atom not yet on the resume" in text
+
+
+def test_system_prompt_leaves_publication_summaries_to_the_fit_step():
+    assert "8. Publications: leave each publication's `summary` as it is" in system_prompt(1)
+
+
+def test_expand_adds_a_grounded_publication_summary(with_pub, hits):
+    resume, pub_hit = with_pub
+    summary = "U-Net with a VGG-16 encoder for brain MRI segmentation, reaching 0.9975 pixel accuracy on 3,929 images."
+    client = fake_client(_with_summary(resume, summary))
+    result = revise(resume, BRIEF, hits + [pub_hit], expand_instruction(0.1, 6), client=client)
+    assert result.resume.publications[0].summary == summary and result.attempts == 1
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert prompt.rstrip().endswith('whose `where` is "none".')
+    assert '"pub-unet"' in prompt                                     # the atom is offered
+
+
+def test_expand_cannot_invent_a_figure_in_a_publication_summary(with_pub, hits):
+    resume, pub_hit = with_pub
+    out = TailoredResume.model_validate_json(_with_summary(resume, "Reached 0.9991 pixel accuracy."))
+    problems = verify(out, resume, hits + [pub_hit])
+    assert any("0.9991" in p for p in problems)

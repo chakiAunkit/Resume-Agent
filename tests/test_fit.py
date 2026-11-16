@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from src.models import Resume
-from src.tools.fit import FILL_MIN, MAX_ITERATIONS, FitError, estimate_scale, fit
+from src.tools.fit import (FILL_MIN, FILL_TARGET, MAX_EXPANSIONS, MAX_ITERATIONS, FitError,
+                          estimate_scale, fit, free_lines)
 from src.tools.render import SCALE_MAX, SCALE_MIN, RenderResult
 
 RESUME = {
@@ -110,3 +111,67 @@ def test_two_page_budget(resume):
     r = FakeRenderer(units_per_item=0.42)  # 2.1 pages -> one scale step to 2
     out = fit(resume, r, max_pages=2)
     assert out.page_count == 2 and out.iterations == 1
+
+
+# ------------------------------------------------- expand step (Oct 2026)
+
+def add_bullet(resume: Resume, room: float, lines: int) -> Resume:
+    r = resume.model_copy(deep=True)
+    r.experience[0].bullets.append("added")
+    return r
+
+
+def test_free_lines_converts_room_to_lines_of_body_text():
+    assert free_lines(0.75, 1, 1.0) == 15        # 0.25 x 1055.8 px / 17.5 px per line
+    assert free_lines(1.02, 1, 1.0) == 0         # no room when already over
+    assert free_lines(0.8, 1, 0.9) > free_lines(0.8, 1, 1.0)   # smaller type, more lines
+
+
+def test_expands_while_there_is_room_and_reverts_an_overflow(resume):
+    """0.15 per item: 5 -> 0.75 (room), 6 -> 0.90 (kept, still room), 7 -> 1.05 (overflow)."""
+    r = FakeRenderer(units_per_item=0.15)
+    asked: list[tuple[float, int]] = []
+
+    def expander(res, room, lines):
+        asked.append((round(room, 2), lines))
+        return add_bullet(res, room, lines)
+
+    out = fit(resume, r, expander=expander, max_pages=1)
+    assert out.expanded == 1 and len(out.resume.experience[0].bullets) == 5
+    assert out.page_count == 1 and out.fill == pytest.approx(0.90)
+    assert any("expanded -> fill 0.90" in a for a in out.actions)
+    assert any("overflowed to 2p, reverted" in a for a in out.actions)
+    assert r.calls[-1] == (6, 1.0)               # the PDF left on disk is the kept version
+    assert asked[0] == (0.25, free_lines(0.75, 1, 1.0)) and len(asked) == MAX_EXPANSIONS
+
+
+def test_content_comes_before_type_size(resume):
+    """0.12 per item: 0.60 -> 0.72 -> 0.84 by content, then the last bit by scale."""
+    r = FakeRenderer(units_per_item=0.12)
+    out = fit(resume, r, expander=add_bullet, max_pages=1)
+    assert out.expanded == 2
+    kinds = ["expanded" if "expanded" in a else "scale" if "scale" in a else a for a in out.actions]
+    assert kinds == ["expanded", "expanded", "scale"]
+    assert out.scale > 1.0 and out.page_count == 1
+
+
+def test_nothing_to_add_falls_back_to_scaling_up(resume):
+    r = FakeRenderer(units_per_item=0.12)
+    out = fit(resume, r, expander=lambda res, room, lines: None, max_pages=1)
+    assert out.expanded == 0 and "nothing to add" in out.actions[0]
+    assert out.scale > 1.0                       # same outcome as with no expander
+
+
+def test_a_full_page_is_not_expanded(resume):
+    r = FakeRenderer(units_per_item=0.19)        # 0.95: at FILL_TARGET already
+    called: list = []
+    out = fit(resume, r, expander=lambda *a: called.append(a), max_pages=1)
+    assert called == [] and out.iterations == 0 and 0.95 >= FILL_TARGET
+
+
+def test_expansion_happens_after_an_over_page_is_fitted(resume):
+    """Over at first: scale down to fit, then use any room left for content."""
+    r = FakeRenderer(units_per_item=0.21)        # 1.05 pages -> one scale step -> ~0.96
+    out = fit(resume, r, expander=add_bullet, max_pages=1)
+    assert out.actions[0].startswith("over (2p")
+    assert out.page_count == 1

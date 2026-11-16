@@ -155,3 +155,8 @@ ul.bullets li {
 .pub {
   margin-bottom: 0.14rem;
 }
+
+.pub-summary {               /* optional one-sentence description, added by the fit loop */
+  margin-top: -0.08rem;
+  margin-bottom: 0.2rem;
+}

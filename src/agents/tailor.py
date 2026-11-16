@@ -113,6 +113,9 @@ become their own bullet, sentence, or skill item, even when an atom describes \
 them.
 7. Skills: add an item only if the fact behind it appears in an offered atom \
 or on the current resume. Keep the existing categories.
+8. Publications: leave each publication's `summary` as it is unless a revision \
+asks for added detail. A summary, when added, is one sentence restating that \
+publication's atom.
 
 Tailoring goals, in priority order:
 - Lead with what the brief values. Reorder bullets, projects and skill items so \
@@ -144,6 +147,31 @@ CUT_INSTRUCTION = (
     "else. The change log has one entry: `where` names the removed item, "
     "`atom_id` is null, `why` says why it was the weakest for this brief."
 )
+
+# Characters in one line of body text at --scale 1 (A4, 0.35in margins,
+# 10.5pt serif): ~110 at full width, ~100 in an indented bullet.
+CHARS_PER_LINE = 100
+
+
+def expand_instruction(free_fraction: float, free_lines: int) -> str:
+    """The fit loop's request when a fitted page has room left — the
+    mirror of CUT_INSTRUCTION. The room is measured by the renderer and
+    stated in lines and characters, units the model can plan in; the loop
+    re-renders and keeps the result only if it still fits."""
+    budget = max(free_lines - 1, 1)          # one line of slack: estimates, not measurements
+    return (
+        f"The rendered resume fits the page budget with about {round(free_fraction * 100)}% "
+        f"of the last page empty, roughly {free_lines} lines of body text. Use that room for "
+        f"this brief: add detail worth at most {budget} lines (about {budget * CHARS_PER_LINE} "
+        "characters), drawn only from the evidence atoms above. Options, in whatever order "
+        "strengthens this resume most for this brief: a bullet from an experience atom not "
+        "yet on the resume, under its company; a project from a project atom; a one-sentence "
+        "`summary` for a publication, restating that publication's atom. Quote figures exactly "
+        "as the atom states them. Do not remove, shorten, reorder or rewrite anything already "
+        "written. Cite each atom you use in the change log. If no offered atom would "
+        "strengthen the resume for this brief, return it unchanged with one change entry "
+        "whose `where` is \"none\"."
+    )
 
 
 def system_prompt(max_pages: int = 1) -> str:
@@ -419,7 +447,7 @@ def revise(
 ) -> TailorResult:
     """A follow-up edit to an already-tailored resume, under the same rules.
 
-    Used by the fit loop (CUT_INSTRUCTION). `resume` here is the tailored
+    Used by the fit loop (CUT_INSTRUCTION, expand_instruction()). `resume` here is the tailored
     one, and it is also the grounding baseline: verify() runs against it,
     so a revision can remove and rephrase but cannot introduce figures or
     skills the tailored resume and offered atoms don't already contain.

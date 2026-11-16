@@ -56,6 +56,18 @@ def test_garbage_data_rejected_before_browser():
         build_html({"contact": {}})
 
 
+def test_publication_summary_renders_only_when_present(resume):
+    """Oct 2026: a paper may carry a one-line summary (added by the fit
+    loop's expand step). Without one, the HTML is exactly as before."""
+    if not resume.publications:
+        pytest.skip("resume.json has no publications")
+    assert 'class="flow pub-summary"' not in build_html(resume)    # the CSS is inlined; check the element
+    with_summary = resume.model_copy(deep=True)
+    with_summary.publications[0].summary = "A one-line description of the paper."
+    html = build_html(with_summary)
+    assert 'class="flow pub-summary"' in html and "A one-line description of the paper." in html
+
+
 def test_scale_out_of_bounds_rejected(resume):
     with pytest.raises(ValueError):
         build_html(resume, scale=0.3)

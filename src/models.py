@@ -107,6 +107,10 @@ class Publication(StrictModel):
     venue: NonEmptyStr
     citations: int = Field(ge=0)
     url: HttpUrlStr
+    # One sentence on what the paper did and found, restated from its
+    # profile atom. Optional: the base resume leaves it out, and the fit
+    # loop's expand step adds it when the page has room.
+    summary: Bullet | None = None
 
 
 # ---------------------------------------------------------------------------

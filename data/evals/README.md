@@ -934,7 +934,60 @@ exist in that form.
 
 ---
 
+## Pipeline runs (Phase 5)
+
+`python run.py --keyword "data scientist" --location Bangalore --pages 3`,
+on the pool cached 2026-09-27 (28 postings, no JSearch request). Stage 1 on
+Qwen3-0.6B with the level gate, stage 2 and the Extractor on
+`openai/gpt-oss-120b`.
+
+| run | date | top | Tailor | delivered | time | ranker tokens in/out | extractor tokens in/out |
+|---|---|---|---|---|---|---|---|
+| P1 | 2026-11-16 | 1 | Claude (live) | 0/1: failed at `tailor` | ~11 min (stage 1 uncached) | 4656/3188 | 2854/3824 |
+| P2 | 2026-11-16 | 3 | stubbed (returns the resume unchanged) | 3/3, one page each, fill 0.88 | 186 s (stage 1 cached) | 6530/5100 | 9117/9758 |
+
+P1 is the first fully live run. It reached the Tailor and Anthropic answered
+400, "Your credit balance is too low". Not a pipeline fault: the posting was
+recorded as `failed` with `error.json` (stage, error, traceback, tokens
+spent so far), `summary.json` was written and the run exited 1. **Phase 5's
+acceptance, three tailored PDFs from one command, is still open.**
+
+P2 replaces only the Tailor's Claude client, so every other node ran for
+real on three postings: cached sourcing, both ranking stages, extraction
+with grounding, retrieval, Chromium rendering, the fit loop and the Judge's
+checks. The PDFs are the base CV; it says nothing about tailoring quality.
+
+What the two runs show:
+
+* **The shortlist's head is stable, its tail is not.** Ranks 1 and 2 were
+  the same postings in both runs (9/10 each). Rank 3 differed. Same lesson
+  as the acceptance run: one slot moves between stage-2 runs.
+* **Extraction varies on one JD.** The rank-1 posting gave 73 must-haves in
+  P1 and 81 in P2 (87 in the October dry run).
+* **Briefs from real postings are large and mostly uncovered.**
+
+  | posting (rank in P2) | must-haves | with evidence in the profile |
+  |---|---|---|
+  | 1 | 81 | 11 (14%) |
+  | 2 | 26 | 7 (27%) |
+  | 3 | 62 | 8 (13%) |
+
+  The hand-written briefs have 27 and 28 must-haves. The Judge reported 79,
+  26 and 64 gaps: nearly all are "no evidence in the profile".
+* **Every posting asks for an expansion.** The base CV fills 0.88 of the
+  page and the expand target is 0.95, so the fit loop called the (stubbed)
+  Tailor once more per posting. Live, that is a second Claude call per CV
+  before any tailoring effect on length.
+* **Stage 1 is a one-off cost per pool.** ~10 minutes to embed the pool's
+  sentences on CPU, 22 s once the vectors are in
+  `data/jobs_cache/embeddings/`.
+
+---
+
 ## Open items
+
+Phase 5 built 2026-11-16; its live acceptance run is open (needs Anthropic
+credit), as are the fresh-pool check and the retrieval experiment below.
 
 Phase 4 closed 2026-10-05: deliverable 1 (`jobs.py`) done; deliverable 2
 (the Extractor) accepted at prompt v3.1 on M7 + M8, reproduced by M9; the

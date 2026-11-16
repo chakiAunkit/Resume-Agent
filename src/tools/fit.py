@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import math
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -243,6 +244,10 @@ def record_failure(out_dir: Path, stage: str, exc: BaseException, usage: dict[st
         "problems": list(getattr(exc, "problems", []) or []),
         "tokens": dict(usage),
         "failed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Where it was raised. Matters for the errors that are not results
+        # (an API error, a bug): the Phase 5 graph catches those too, so
+        # this file is the only place their traceback survives.
+        "traceback": traceback.format_exception(exc),
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     last_output = getattr(exc, "last_output", None)
     if last_output:
@@ -267,7 +272,7 @@ if __name__ == "__main__":
     from src.agents import tailor as tailor_agent
     from src.atoms import Profile
     from src.brief import JobBrief
-    from src.tools.evidence import BriefHit, retrieve_for_brief
+    from src.tools.evidence import retrieve_for_brief
     from src.tools.render import ROOT, Renderer
 
     load_dotenv()
@@ -323,36 +328,14 @@ if __name__ == "__main__":
     print(f"tailor: {t.attempts} attempt(s), tokens {t.usage['input_tokens']}/{t.usage['output_tokens']}, "
           f"{len(t.changes)} changes; uncovered: {', '.join(t.uncovered) or 'none'}")
     usage.update(t.usage)
-    cut_log: list = []
 
-    def cut(current: Resume) -> Resume:
-        r = tailor_agent.revise(current, brief, hits, tailor_agent.CUT_INSTRUCTION,
-                                model=args.model, effort=args.effort, max_pages=args.pages)
-        usage["input_tokens"] += r.usage["input_tokens"]
-        usage["output_tokens"] += r.usage["output_tokens"]
-        cut_log.extend(r.changes)
-        return r.resume
-
-    # Publications are already on the CV, so their atoms are always offered
-    # to the expander even when they score zero for this brief: a paper's
-    # one-line summary can only quote figures from an offered atom.
-    offered = {h.atom.id for h in hits}
-    expand_hits = hits + [BriefHit(a, 0.0, (), ()) for a in profile.atoms
-                          if a.section == "publication" and a.id not in offered]
-    expand_logs: list[list] = []
-
-    def expand(current: Resume, room: float, lines: int) -> Resume | None:
-        try:
-            r = tailor_agent.revise(current, brief, expand_hits, tailor_agent.expand_instruction(room, lines),
-                                    model=args.model, effort=args.effort, max_pages=args.pages)
-        except tailor_agent.TailorError as e:
-            # A rejected expansion costs the extra detail, never the fitted CV.
-            print(f"  expand rejected, keeping the fitted version: {e.problems[0] if e.problems else e}")
-            return None
-        usage["input_tokens"] += r.usage["input_tokens"]
-        usage["output_tokens"] += r.usage["output_tokens"]
-        expand_logs.append([c for c in r.changes if c.where != "none"])
-        return r.resume
+    # The cutter and expander are the Tailor's revise() behind the fit loop's
+    # two callables; `log` collects what they spend and change. `usage` is the
+    # same dict, so fail() and the total below see the revisions' tokens too.
+    log = tailor_agent.RevisionLog(usage=usage)
+    settings = dict(model=args.model, effort=args.effort, max_pages=args.pages)
+    cut = tailor_agent.cutter(brief, hits, log, **settings)
+    expand = tailor_agent.expander(brief, tailor_agent.expansion_hits(hits, profile.atoms), log, **settings)
 
     try:
         with Renderer() as renderer:
@@ -364,7 +347,9 @@ if __name__ == "__main__":
 
     for name in FAILURE_FILES:                                       # this run succeeded: clear an old failure
         out.with_name(name).unlink(missing_ok=True)
-    added = [c for log in expand_logs[:f.expanded] for c in log]     # kept expansions only
+    cut_log, added = log.cuts, log.kept_expansions(f.expanded)       # kept expansions only
+    for note in log.notes:
+        print(f"  {note}")
     out.with_suffix(".json").write_text(f.resume.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
     out.with_name("changes.json").write_text(
         json.dumps([c.model_dump() for c in t.changes + cut_log + added], indent=2), encoding="utf-8")

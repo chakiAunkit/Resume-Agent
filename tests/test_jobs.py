@@ -357,6 +357,17 @@ def test_missing_key_fails_before_any_request(monkeypatch):
 
 # ------------------------------------------------------------------ dump
 
+def test_jd_text_carries_title_and_company_for_the_extractor():
+    """The Extractor's verify() looks for the brief's title and company in
+    the JD text; a description alone often names neither."""
+    from src.tools.jobs import jd_text
+    post = JSearchProvider(api_key="x").parse(_raw(_item("a", title="Staff Analyst", company="Globex")))[0]
+    assert "Globex" not in post.description and "Staff Analyst" not in post.description
+    text = jd_text(post)
+    assert text.splitlines()[0] == "# Staff Analyst — Globex"
+    assert text.endswith(post.description.strip() + "\n")
+
+
 def test_dump_jd_writes_header_and_description(tmp_path):
     post = JSearchProvider(api_key="x").parse(_raw(_item("a")))[0]
     path = dump_jd(post, tmp_path)

@@ -75,6 +75,7 @@ also holds through stage 2 — the reranker orders postings within each tier.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -236,6 +237,54 @@ class CachedEmbedder:
             for text, row in zip(todo, self.inner.encode(todo, query=query)):
                 self._cache[(query, text)] = row
         return np.vstack([self._cache[(query, t)] for t in texts]) if texts else np.zeros((0, 0))
+
+
+EMBED_CACHE_DIR = ROOT / "data" / "jobs_cache" / "embeddings"      # gitignored with the rest of the cache
+
+
+class DiskCachedEmbedder:
+    """CachedEmbedder that also remembers between runs.
+
+    Stage 1 embeds every sentence of every posting. On a CPU that took over
+    ten minutes for 28 postings with Qwen3-0.6B (2026-11-16), and the Phase 5
+    pipeline would wait that long on every run before its first LLM call. A
+    posting's sentences do not change, so their vectors are kept in one file
+    per embedder under data/jobs_cache/embeddings/ and only new text is
+    embedded. Vectors are stored as computed, so a cached run ranks exactly
+    as an uncached one.
+
+    The key covers the text, which side it is on (query or not) and the
+    embedder's query instruction, so changing an instruction re-embeds.
+    """
+
+    def __init__(self, inner: Embedder, cache_dir: Path | str = EMBED_CACHE_DIR):
+        self.inner = inner
+        self.name = inner.name
+        self._salt = getattr(inner, "_prompt", None) or ""
+        self._path = Path(cache_dir) / (re.sub(r"[^a-z0-9]+", "-", inner.name.lower()).strip("-") + ".npz")
+        self._cache: dict[str, np.ndarray] = {}
+        if self._path.exists():
+            with np.load(self._path) as saved:
+                self._cache = dict(zip(saved["keys"].tolist(), saved["vectors"]))
+
+    def _key(self, text: str, query: bool) -> str:
+        salt = self._salt if query else ""
+        return hashlib.sha1(f"{int(query)}\x00{salt}\x00{text}".encode("utf-8")).hexdigest()
+
+    def encode(self, texts: list[str], *, query: bool = False) -> np.ndarray:
+        keys = [self._key(t, query) for t in texts]
+        todo = list(dict.fromkeys(t for t, k in zip(texts, keys) if k not in self._cache))
+        if todo:
+            for text, row in zip(todo, self.inner.encode(todo, query=query)):
+                self._cache[self._key(text, query)] = row
+            self._save()        # after every batch: a crash mid-pool keeps what was embedded
+        return np.vstack([self._cache[k] for k in keys]) if texts else np.zeros((0, 0))
+
+    def _save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp.npz")
+        np.savez(tmp, keys=np.array(list(self._cache)), vectors=np.vstack(list(self._cache.values())))
+        os.replace(tmp, self._path)     # whole file or nothing: an interrupted write never corrupts the cache
 
 
 _BULLET = re.compile(r"^\s*(?:[-*•·●▪◦‣–—]+|\(?\d{1,2}[.)])\s*")
@@ -831,7 +880,7 @@ if __name__ == "__main__":
         print(f"level gate: you have {you:.1f} years; postings asking more than "
               f"{you + options.level_slack:.1f} are demoted")
     result = rank(posts, Profile.load(args.profile), resume,
-                  embedder=make_embedder(args.embed), options=options,
+                  embedder=DiskCachedEmbedder(make_embedder(args.embed)), options=options,
                   model=args.model, rerank_top=0 if args.stage1_only else args.rerank)
     if result.model:
         print(f"stage 2: {result.model}, tokens in/out "

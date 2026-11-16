@@ -30,9 +30,9 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from anthropic import transform_schema
 from pydantic import Field, ValidationError
@@ -579,6 +579,79 @@ def revise(
         client=client, model=model or default_model(), effort=effort or default_effort(),
         max_pages=max_pages,
     )
+
+
+# ---------------------------------------------------------------------------
+# Adapters for the fit loop
+# ---------------------------------------------------------------------------
+# src/tools/fit.py takes a `cutter` and an `expander` as plain callables and
+# never imports this module. These factories build those callables from
+# revise(), so the fit CLI and the Phase 5 graph node wire the loop the same
+# way instead of each carrying its own copy of the closures.
+
+@dataclass
+class RevisionLog:
+    """What the fit loop's revisions cost and changed, filled in as the
+    cutter and expander are called."""
+
+    usage: dict[str, int] = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
+    cuts: list[Change] = field(default_factory=list)
+    # One entry per expansion that returned a resume, in call order. The fit
+    # loop keeps the first FitResult.expanded of them (it stops at an overflow).
+    expansions: list[list[Change]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)      # e.g. an expansion that was rejected
+
+    def spend(self, usage: dict[str, int]) -> None:
+        for key, n in usage.items():
+            self.usage[key] = self.usage.get(key, 0) + n
+
+    def kept_expansions(self, kept: int) -> list[Change]:
+        return [c for changes in self.expansions[:kept] for c in changes]
+
+
+def expansion_hits(hits: list[BriefHit], atoms: Sequence[Atom]) -> list[BriefHit]:
+    """`hits` plus every publication atom not already among them. Publications
+    are on the CV whatever the brief, so their atoms are always offered to the
+    expander even when they score zero: a paper's one-line summary can only
+    quote figures from an offered atom."""
+    offered = {h.atom.id for h in hits}
+    return hits + [BriefHit(a, 0.0, (), ()) for a in atoms
+                   if a.section == "publication" and a.id not in offered]
+
+
+def cutter(brief: JobBrief, hits: list[BriefHit], log: RevisionLog, *, client: Any = None,
+           model: str | None = None, effort: str | None = None,
+           max_pages: int = 1) -> Callable[[Resume], Resume]:
+    """The fit loop's cutter: one revise() with CUT_INSTRUCTION. A rejected
+    cut raises TailorError: an over-length resume has no fallback."""
+    def cut(current: Resume) -> Resume:
+        r = revise(current, brief, hits, CUT_INSTRUCTION, client=client, model=model,
+                   effort=effort, max_pages=max_pages)
+        log.spend(r.usage)
+        log.cuts.extend(r.changes)
+        return r.resume
+    return cut
+
+
+def expander(brief: JobBrief, hits: list[BriefHit], log: RevisionLog, *, client: Any = None,
+             model: str | None = None, effort: str | None = None,
+             max_pages: int = 1) -> Callable[[Resume, float, int], Resume | None]:
+    """The fit loop's expander: one revise() with expand_instruction(). Pass
+    `hits` through expansion_hits() first. A rejected expansion returns None:
+    it costs the extra detail, never the fitted CV."""
+    def expand(current: Resume, room: float, lines: int) -> Resume | None:
+        try:
+            r = revise(current, brief, hits, expand_instruction(room, lines), client=client,
+                       model=model, effort=effort, max_pages=max_pages)
+        except TailorError as e:
+            log.spend(e.usage)
+            log.notes.append("expansion rejected, fitted version kept: "
+                             f"{e.problems[0] if e.problems else e}")
+            return None
+        log.spend(r.usage)
+        log.expansions.append([c for c in r.changes if c.where != "none"])
+        return r.resume
+    return expand
 
 
 # ---------------------------------------------------------------------------

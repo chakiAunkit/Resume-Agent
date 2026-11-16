@@ -519,6 +519,31 @@ def test_load_labels_accepts_skip():
     assert load_labels(path)[1] == {"a": "skip", "b": "yes"}
 
 
+def test_disk_cached_embedder_embeds_each_text_once_across_runs(tmp_path):
+    """Stage 1 is the slow step; a second run must not redo it."""
+    from src.agents.ranker import DiskCachedEmbedder
+    first_inner = BagOfWords()
+    first = DiskCachedEmbedder(first_inner, cache_dir=tmp_path)
+    a = first.encode(["fraud detection rules", "supply chain", "fraud detection rules"])
+    assert a.shape == (3, 256) and len(first_inner.embedded) == 2            # the repeat is embedded once
+    assert (tmp_path / "bag-of-words.npz").exists()
+
+    second_inner = BagOfWords()                                              # a new process
+    second = DiskCachedEmbedder(second_inner, cache_dir=tmp_path)
+    b = second.encode(["fraud detection rules", "supply chain", "fraud detection rules"])
+    assert second_inner.embedded == [] and np.array_equal(a, b)              # nothing embedded, same vectors
+    second.encode(["supply chain", "wafer inspection"])
+    assert second_inner.embedded == [(False, "wafer inspection")]            # only the new text
+    second.encode(["supply chain"], query=True)                              # the query side is its own entry
+    assert second_inner.embedded[-1] == (True, "supply chain")
+
+    # and it ranks exactly as the uncached embedder does
+    plain = [s.post.id for s in score_postings(POSTS, ranking_atoms(PROFILE), BagOfWords())]
+    cached = [s.post.id for s in score_postings(POSTS, ranking_atoms(PROFILE),
+                                                DiskCachedEmbedder(BagOfWords(), cache_dir=tmp_path))]
+    assert cached == plain
+
+
 def test_eval_date_is_the_fetch_day_not_today():
     """The eval's level gate must not drift: experience is counted to the
     day the labelled pool was fetched, whenever the eval is run."""

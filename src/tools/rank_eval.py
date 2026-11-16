@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     from dotenv import load_dotenv
 
-    from src.agents.ranker import (DEFAULT_EMBEDDER, LEVEL_SLACK, RERANK_TOP, CachedEmbedder,
+    from src.agents.ranker import (DEFAULT_EMBEDDER, LEVEL_SLACK, RERANK_TOP, DiskCachedEmbedder,
                                    Stage1Options, experience_years, make_embedder, rank)
     from src.atoms import Profile
     from src.config import ranker_exclude_atoms
@@ -285,7 +285,7 @@ if __name__ == "__main__":
         for spec in (s.strip() for s in args.compare.split(",") if s.strip()):
             start = time.perf_counter()
             try:
-                embedder = CachedEmbedder(make_embedder(spec))
+                embedder = DiskCachedEmbedder(make_embedder(spec))     # vectors kept between runs
                 for options in variants:
                     result = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0,
                                   today=as_of)
@@ -300,7 +300,7 @@ if __name__ == "__main__":
     # With no flags this is ranker.default_options(): the flags' defaults are its values.
     options = Stage1Options(titles=not args.no_titles, center=args.center, exclude=exclude,
                             level_slack=None if args.no_gate else args.gate_slack)
-    embedder = CachedEmbedder(make_embedder(args.embed))    # one load; stage 1 repeats every run
+    embedder = DiskCachedEmbedder(make_embedder(args.embed))    # one load; vectors kept between runs
     stage1 = rank(posts, profile, resume, embedder=embedder, options=options, rerank_top=0, today=as_of)
     print("\n".join(report_stage(f"stage 1 ({args.embed}; {options.label})",
                                  [[r.ref for r in stage1.ranked]], labels, titles, args.k,

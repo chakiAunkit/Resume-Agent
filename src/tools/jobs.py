@@ -407,16 +407,27 @@ def fetch_jobs(
     return posts
 
 
-def dump_jd(post: JobPost, out_dir: Path | str) -> Path:
-    """Write one JD as `<slug>.txt` with a short header, the same shape as
-    the hand-collected `data/*.txt` JDs — for hand-labelling eval cases."""
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{post.slug}.txt"
+def jd_text(post: JobPost) -> str:
+    """A posting as the JD text the Extractor reads: a short header, then
+    the description — the same shape as the hand-collected `data/*.txt` JDs.
+
+    The header is not decoration. The Extractor's verify() requires the
+    brief's title and company to appear in the JD text, and many
+    descriptions never repeat either: they open with "About the role".
+    Extracting from the bare description would reject a correct brief.
+    """
     header = [f"# {post.title} — {post.company}",
               f"# {post.location or 'location n/a'} | {post.source}:{post.publisher or '?'} | {post.posted_at or 'date n/a'}",
               f"# {post.url or ''}".rstrip(), ""]
-    path.write_text("\n".join(header) + post.description.strip() + "\n", encoding="utf-8")
+    return "\n".join(header) + post.description.strip() + "\n"
+
+
+def dump_jd(post: JobPost, out_dir: Path | str) -> Path:
+    """Write one JD as `<slug>.txt` (see jd_text) — for hand-labelling eval cases."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{post.slug}.txt"
+    path.write_text(jd_text(post), encoding="utf-8")
     return path
 
 

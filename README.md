@@ -36,7 +36,23 @@ keyword ──▶ Sourcer ──▶ Ranker stage 1 ──▶ level gate ──�
                                              level)         + a reason)
 ```
 
-All nodes, to be orchestrated with LangGraph in Phase 5:
+Phase 5 wires the two halves into one LangGraph pipeline (`src/graph/`),
+run by `run.py`:
+
+```
+RUN GRAPH       START ─▶ sourcer ─▶ ranker ─▶ posting (one task per shortlisted posting) ─▶ present ─▶ END
+
+POSTING GRAPH   START ─▶ extract ─▶ retrieve ─▶ tailor ─▶ fit ─▶ judge ─┬─▶ finish ─▶ END
+(per posting)                                     ▲                     │
+                                                  └── Judge has fixes, fewer than 2 retries
+                any step that fails records error.json and goes straight to finish
+```
+
+The state is typed (`src/graph/state.py`). The ranker fans out with one
+`Send` per posting; results merge back through a reducer. The Judge's loop
+is bounded by an `attempts` counter in the state. A node never raises: a
+posting that fails is recorded and the others carry on. `python run.py
+--graph` prints both graphs as Mermaid.
 
 | Node | Role | Status |
 |---|---|---|
@@ -45,8 +61,9 @@ All nodes, to be orchestrated with LangGraph in Phase 5:
 | Extractor | Raw JD → `JobBrief` (must / nice / soft, one concept each); grounded; one retry | ✅ `src/agents/extractor.py` |
 | Retriever | Rank evidence atoms against the brief, with coverage | ✅ `retrieve_for_brief` |
 | Tailor | Rewrite resume JSON against the brief; grounded; one retry | ✅ `src/agents/tailor.py` |
-| Fit | Render, measure, scale or cut until it fits `max_pages` | ✅ `src/tools/fit.py` |
-| Judge | Rubric check: claims traceable, keywords covered, ATS-safe | Phase 6 |
+| Fit | Render, measure, scale, cut or expand until it fits `max_pages` | ✅ `src/tools/fit.py` |
+| Judge | Tool-read checks: page budget, ATS-extractable text, coverage gaps | ✅ `src/tools/checks.py` |
+| Judge (LLM) | Rubric: claims traceable, keywords embedded, every bullet an achievement | Phase 6 |
 
 Claude for tailoring and judging (different models — the Judge never
 grades its own homework); `openai/gpt-oss-120b` on Groq for extraction and
@@ -85,7 +102,27 @@ python -m src.tools.evidence --brief data/sample_jd.brief.yaml -k 8   # what evi
 python -m src.tools.extract_eval --rescore                   # re-score the saved Extractor runs
 ```
 
-Run (uses API credits):
+Run the whole pipeline (uses API credits):
+
+```bash
+python run.py --keyword "data scientist" --location Bangalore --top 3
+```
+
+It writes `output/<keyword>-<location>/`: `shortlist.json` (the ranking),
+`summary.json` (one row per posting: status, pages, fill, gaps, tokens),
+and a folder per shortlisted posting, `<rank>-<ref>/`, holding
+`brief.yaml`, `resume.pdf`, `resume.json`, `resume.html` (debug),
+`changes.json` (what changed, citing atoms) and `judge.json`. A posting
+that fails holds `error.json` instead (the stage, the reason, the
+traceback), and the run's exit code is 1.
+
+Cost of a run: one JSearch request per page not already cached; the rerank
+and one extraction per shortlisted posting on Groq; per posting, one Claude
+call to tailor plus up to two to fill leftover room (`--no-expand` skips
+those). Postings are read from the cache however old it is, with a warning
+after 7 days; `--refresh` re-fetches and overwrites the cached pool.
+
+Each node still runs on its own:
 
 ```bash
 python -m src.tools.jobs "data scientist" --location Bangalore --pages 3      # JSearch, cached
@@ -94,29 +131,34 @@ python -m src.agents.extractor data/sample_jd.txt            # raw JD -> JobBrie
 python -m src.tools.fit --brief data/sample_jd.brief.yaml    # JD brief -> tailored, fitted PDF (Claude)
 ```
 
-The last command writes `output/<brief>/resume.pdf`, `resume.json`,
-`resume.html` (debug) and `changes.json` (what changed, citing atoms).
-Until Phase 5 wires them together, each node runs on its own.
-
 ## Layout
 
 - `assets/` — `resume.json` (the CV as data), canonical `.tex` + reference PDF (gitignored)
 - `data/profile.yaml` — evidence store: everything true about the candidate, superset of the CV (gitignored; `profile.example.yaml` committed)
 - `data/<jd>.txt` + `data/<jd>.brief.yaml` — raw JDs and their hand-written briefs; the briefs are the Extractor's eval set
 - `data/evals/` — the eval log (`README.md`) and the Extractor's saved runs (`extracted/`)
-- `data/jobs_cache/` — cached JSearch responses and your Ranker labels (gitignored)
+- `data/jobs_cache/` — cached JSearch responses, cached sentence embeddings and your Ranker labels (gitignored)
 - `templates/` — Jinja2 template + print CSS; all presentation lives here
 - `src/models.py`, `src/atoms.py`, `src/brief.py` — the three data contracts: what may be on the page, what is true, what the job wants
 - `src/config.py` — model routing: providers, model ids, per-model request settings
-- `src/tools/` — deterministic tools: `render` (PDF, pages, fill), `evidence` (retrieval), `fit` (page loop), `jobs` (sourcing), and the evals `extract_eval`, `rank_eval`
-- `src/agents/` — LLM nodes: `tailor`, `extractor`, `ranker`; the Judge comes in Phase 6
+- `src/tools/` — deterministic tools: `render` (PDF, pages, fill), `evidence` (retrieval), `fit` (page loop), `jobs` (sourcing), `checks` (the Judge's tool-read checks), and the evals `extract_eval`, `rank_eval`
+- `src/agents/` — LLM nodes: `tailor`, `extractor`, `ranker`; the LLM Judge comes in Phase 6
+- `src/graph/` — the pipeline: `state` (typed shared state), `nodes` (one thin wrapper per step), `build` (edges, the fan-out, the Judge's loop)
+- `run.py` — the one command: keyword → tailored PDFs
 - `tests/` — pytest suite; everything that touches gitignored data skips cleanly without it
 - `output/` — generated artifacts (gitignored)
 
 ## Status
 
-Phases 0–4 complete.
+Phases 0–4 complete. Phase 5 is built; its live acceptance run is pending.
 
+- **Phase 5:** `run.py` takes a keyword to one tailored PDF per shortlisted
+  posting through a LangGraph pipeline. Verified on the cached pool with
+  real ranking, extraction and rendering and the Tailor's Claude call
+  stubbed: three postings, three one-page PDFs. The first fully live run
+  (2026-11-16) stopped at the Tailor because the Anthropic account had no
+  credit; the run recorded the failure and ended cleanly. Acceptance is the
+  same command with credit: three tailored PDFs.
 - **Phase 3:** one command turns a job brief into a validated, grounded,
   one-page PDF with a change log. Two real JDs end to end, both first
   attempt.
@@ -127,5 +169,6 @@ Phases 0–4 complete.
   28 postings. That result is in-sample; the check on a fresh pool is
   planned for Phase 5.
 
-Next: Phase 5 — wire Sourcer → Ranker → Extractor → Retriever → Tailor →
-Fit with LangGraph, so one command goes from a keyword to tailored PDFs.
+Next: the live acceptance run, then the two evals Phase 5 still owes (the
+Ranker on a fresh, pre-labelled pool; keyword vs. embedding retrieval), then
+Phase 6: the LLM Judge, tracing and cost.

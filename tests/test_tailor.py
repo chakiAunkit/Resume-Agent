@@ -470,6 +470,43 @@ def test_expand_cannot_invent_a_figure_in_a_publication_summary(with_pub, hits):
     assert any("0.9991" in p for p in problems)
 
 
+# ------------------------------------- adapters for the fit loop (Phase 5)
+
+def test_cutter_revises_with_the_cut_instruction_and_logs_it(resume, hits):
+    from src.agents.tailor import RevisionLog, cutter
+    tailored = TailoredResume.model_validate_json(_good_output()).resume
+    cut_resume = tailored.model_copy(deep=True)
+    cut_resume.experience[0].bullets.pop(0)
+    reply = json.dumps({"resume": cut_resume.model_dump(mode="json"),
+                        "changes": [{"where": "experience[Target Corporation].bullets[0]",
+                                     "atom_id": None, "why": "least relevant"}]})
+    client, log = fake_client(reply), RevisionLog()
+    out = cutter(BRIEF, hits, log, client=client)(tailored)
+    assert len(out.experience[0].bullets) == 1
+    assert client.calls[0]["messages"][0]["content"].rstrip().endswith(CUT_INSTRUCTION)
+    assert log.usage == {"input_tokens": 100, "output_tokens": 50} and len(log.cuts) == 1
+
+
+def test_expander_logs_a_kept_expansion_and_survives_a_rejected_one(with_pub, hits):
+    from src.agents.tailor import RevisionLog, expander, expansion_hits
+    resume, pub_hit = with_pub
+    offered = expansion_hits(hits, [pub_hit.atom, hits[0].atom])
+    assert [h.atom.id for h in offered] == [h.atom.id for h in hits] + ["pub-unet"]   # added once, scored 0
+    assert offered[-1].score == 0.0 and offered[-1].covers == ()
+
+    good = _with_summary(resume, "U-Net with a VGG-16 encoder reaching 0.9975 pixel accuracy on 3,929 images.")
+    log = RevisionLog()
+    out = expander(BRIEF, offered, log, client=fake_client(good))(resume, 0.1, 6)
+    assert out.publications[0].summary.startswith("U-Net") and len(log.expansions) == 1
+    assert log.kept_expansions(1)[0].atom_id == "pub-unet" and log.kept_expansions(0) == []
+
+    bad = _with_summary(resume, "Reached 0.9991 pixel accuracy.")                    # an invented figure, twice
+    log = RevisionLog()
+    assert expander(BRIEF, offered, log, client=fake_client(bad, bad))(resume, 0.1, 6) is None
+    assert log.expansions == [] and "0.9991" in log.notes[0]
+    assert log.usage == {"input_tokens": 200, "output_tokens": 100}                 # the failed calls still cost
+
+
 # --------------------------------------- verify: publication facts
 
 @pytest.mark.parametrize("field, value", [
